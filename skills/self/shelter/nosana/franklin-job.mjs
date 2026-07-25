@@ -49,16 +49,18 @@ export function subWalletSecretBase58({ env = process.env } = {}) {
 export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort }) {
   if (typeof prompt !== "string" || prompt.length === 0) throw new Error("buildFranklinBootScript: prompt required");
   // Single sh -c script. Franklin output → /tmp/proof.txt; then a forever http server serves it.
+  // ONE flat string — a live A/B (probe job 6ceJBBkf vs franklin job J4FW, 2026-07-26) showed the
+  // node runs a string cmd fine but an ["sh","-c",script] ARRAY died ~3s into the flow. String it is.
   return [
     "set -e",
     "npm i -g @blockrun/franklin >/tmp/npm.log 2>&1",
     'mkdir -p "$HOME/.blockrun"',
     'printf "%s" "$SOLANA_SESSION" > "$HOME/.blockrun/.solana-session"',
     'chmod 600 "$HOME/.blockrun/.solana-session"',
-    `franklin start --trust -m ${model} --max-spend ${maxSpendUsd} -p ${JSON.stringify(prompt)} 2>&1 | tee /tmp/proof.txt || true`,
+    `(franklin start --trust -m ${model} --max-spend ${maxSpendUsd} -p ${JSON.stringify(prompt)} 2>&1 | tee /tmp/proof.txt) || true`,
     // Keep-alive proof server: anyone can GET the container's own account of what it did.
     `node -e 'const http=require("http"),fs=require("fs");http.createServer((q,s)=>{s.setHeader("content-type","text/plain");s.end("FRANKLIN-IN-NOSANA proof\\n\\n"+fs.readFileSync("/tmp/proof.txt","utf8"))}).listen(${exposePort},()=>console.log("proof server on ${exposePort}"))'`,
-  ].join("\n");
+  ].join("; ");
 }
 
 /**
@@ -80,7 +82,7 @@ export function buildFranklinJobDefinition({
     image: "docker.io/library/node:20-alpine",
     exposePort,
     gpu: true,
-    cmd: ["sh", "-c", script],
+    cmd: script,
     env: { SOLANA_SESSION: solanaSessionB58 },
     id: "franklin",
   });

@@ -21,6 +21,7 @@ test("secret never appears in cmd — env is the only channel", () => {
   const cmdText = JSON.stringify(def.ops[0].args.cmd);
   assert.equal(cmdText.includes(FAKE_SECRET), false);
   assert.match(cmdText, /\$SOLANA_SESSION/); // script reads it from env at runtime
+  assert.equal(typeof def.ops[0].args.cmd, "string"); // string cmd — array form died on the node (live A/B)
 });
 
 test("boot script: installs franklin, hard spend cap, keep-alive proof server", () => {
