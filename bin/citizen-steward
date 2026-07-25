@@ -55,12 +55,13 @@ if (args.includes("--verify")) {
   const rows = fs
     .readFileSync(file, "utf8")
     .split("\n")
-    .filter((l) => l.trim().length > 0)
-    .map((l, i) => {
+    .map((l, i) => ({ raw: l, line: i + 1 })) // real file line numbers, computed BEFORE filtering
+    .filter(({ raw }) => raw.trim().length > 0)
+    .map(({ raw, line }) => {
       try {
-        return { line: i + 1, entry: JSON.parse(l) };
+        return { line, entry: JSON.parse(raw) };
       } catch {
-        return { line: i + 1, entry: null };
+        return { line, entry: null };
       }
     })
     .filter((r) => !jobFilter || (r.entry && r.entry.jobAddress === jobFilter));
