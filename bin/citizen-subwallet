@@ -1,0 +1,85 @@
+#!/usr/bin/env node
+// citizen-subwallet — thin CLI for the S8 capped sub-wallet (logic in sub-wallet.mjs).
+//
+//   citizen-subwallet status                       addresses + live balances (owner + sub)
+//   citizen-subwallet fund --nos <amt> --sol <amt> [--live]
+//        dry by default: run the funding gate against REAL balances and print exactly what
+//        would move, then stop. --live actually transfers from Franklin's wallet.
+//   citizen-subwallet export-path                  print the sub-wallet keypair path (S12 wiring)
+
+import { ensureSubWallet, fundSubWallet, DEFAULT_NOS_CAP, DEFAULT_SOL_CAP } from "../skills/self/shelter/nosana/sub-wallet.mjs";
+import { ensureNosanaKeypair } from "../skills/self/shelter/nosana/keypair.mjs";
+import { NOS_MINT } from "../skills/self/shelter/nosana/market.mjs";
+import { DEFAULT_RPC_URL } from "../skills/self/shelter/nosana/deploy.mjs";
+
+function printHelp() {
+  process.stdout.write(
+    [
+      "Usage:",
+      "  citizen-subwallet status",
+      "  citizen-subwallet fund --nos <amt> --sol <amt> [--live]",
+      "  citizen-subwallet export-path",
+      "",
+      `Caps: ${DEFAULT_NOS_CAP} NOS / ${DEFAULT_SOL_CAP} SOL (override: NOSANA_SUBWALLET_NOS_CAP / NOSANA_SUBWALLET_SOL_CAP).`,
+      "Env: ANICCA_HOME (required), NOSANA_RPC_URL / SOLANA_RPC_URL.",
+      "",
+    ].join("\n"),
+  );
+}
+
+function argValue(args, flag) {
+  const i = args.indexOf(flag);
+  return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
+}
+
+const args = process.argv.slice(2);
+const mode = args[0];
+if (!mode || args.includes("--help") || args.includes("-h")) {
+  printHelp();
+  process.exit(mode ? 0 : 2);
+}
+
+try {
+  if (mode === "export-path") {
+    process.stdout.write(`${ensureSubWallet({}).keypairPath}\n`);
+    process.exit(0);
+  }
+
+  if (mode === "status") {
+    const w3 = await import("@solana/web3.js");
+    const owner = ensureNosanaKeypair({});
+    const sub = ensureSubWallet({});
+    const conn = new w3.Connection(process.env.NOSANA_RPC_URL || process.env.SOLANA_RPC_URL || DEFAULT_RPC_URL, "confirmed");
+    const mint = new w3.PublicKey(NOS_MINT);
+    async function line(label, addressB58) {
+      const pub = new w3.PublicKey(addressB58);
+      const sol = (await conn.getBalance(pub)) / w3.LAMPORTS_PER_SOL;
+      const resp = await conn.getParsedTokenAccountsByOwner(pub, { mint });
+      const nos = resp.value.length ? resp.value[0].account.data.parsed.info.tokenAmount.uiAmount : 0;
+      process.stdout.write(`${label}: ${addressB58}  ${sol} SOL  ${nos} NOS\n`);
+    }
+    await line("owner", owner.address);
+    await line("sub  ", sub.address);
+    process.exit(0);
+  }
+
+  if (mode === "fund") {
+    const requestNos = Number(argValue(args, "--nos") || 0);
+    const requestSol = Number(argValue(args, "--sol") || 0);
+    const live = args.includes("--live");
+    const result = await fundSubWallet({ live, requestNos, requestSol });
+    if (!result.gate.allowed) process.exit(1);
+    if (live && result.sent) {
+      process.stdout.write(`funded: SOL sig ${result.signatures.sol || "-"} | NOS sig ${result.signatures.nos || "-"}\n`);
+    }
+    process.exit(0);
+  }
+
+  process.stderr.write(`citizen-subwallet: unknown mode "${mode}"\n`);
+  printHelp();
+  process.exit(2);
+} catch (err) {
+  // sub-wallet.mjs/keypair.mjs error messages never include secret material — safe to print.
+  process.stderr.write(`citizen-subwallet: ${(err && err.message) || err}\n`);
+  process.exit(1);
+}
