@@ -22,7 +22,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 | 順 | ID | 内容 | 状態 |
 |---|---|---|---|
-| 1 | S9 | 常駐化 — post して exit する現行を、lease 全期間ループへ。lease 中に伸びた timeout の再読含む。毎サイクル新しい blockhash で署名 = 「ずっと生きていた」の第三者検証可能な証拠 | 🔄 実装済み・E2E 走行中（2026-07-26）。branch `s9-steward`: heartbeat.mjs + steward.mjs + bin/citizen-steward、77/77 test green、adversary review PASS。live job `AnubczGS5FZmyqrEtv7AwJ2b7Ks1f7TTsYQ7HK2u3meo`（$0.012）に steward attach 済み — lease 完走 + `--verify` PASS で完了。container 側の署名 loop は S12 で Franklin 本体ごと載せる |
+| 1 | S9 | 常駐化 — lease 全期間ループ + timeout 再読 + 毎サイクル blockhash 署名 | ✅ **完了 2026-07-26**。実測: live job `AnubczGS5FZmyqrEtv7AwJ2b7Ks1f7TTsYQ7HK2u3meo`（$0.012 自費）に steward attach、queued→running→success の全 lease を 14 cycles 常駐、`citizen-steward --verify --rpc` = **14/14 PASS（全署名有効 + 全 blockhash が実 slot と on-chain 一致）**。実装 main merge 済み（heartbeat.mjs / steward.mjs / bin/citizen-steward、77/77 tests、review PASS）。container 側の署名 loop は S12 で Franklin 本体ごと載せる |
 | 2 | S8 | **sub-wallet 方式**で on-chain spend cap（設計転換 2026-07-26）。SPL Approve 委任は不可 — nosana-jobs `list.rs` の Anchor constraint が `user == payer 自身の ATA` を強制し delegate 経路を遮断（一次ソース: nosana-ci/nosana-programs list.rs + solana-program/token processor.rs L273-290、research agent 検証済み）。代替 = cap 分の NOS + 少額 SOL だけ入金した hot sub-wallet を作り、その鍵のみ cloud へ。cap 強制 = 残高そのもの（SOL 側も cap される分 delegate より強い）。@nosana/sdk `list(..., payer=subWallet)` が公式に payer 分離対応。refund も sub-wallet ATA に閉じる | 未着手・最重要 |
 | 3 | S13 | `--confidential` job 実測 — ベンダー自身の秘密投入機構。definition が公開 IPFS に載らない。`--wait` 必須・ログはライブのみ。一度も未試行 | 未着手（S8 の代替/補完） |
 | 4 | S12 | Franklin 本体を Nosana へ（BASE_CHAIN_WALLET_KEY / CDP_API_KEY_* が要るので S8 or S13 が前提） | 未着手 |
