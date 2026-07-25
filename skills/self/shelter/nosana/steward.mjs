@@ -148,8 +148,23 @@ export async function stewardLoop({
 
     // Beat even when this cycle's API read failed — aliveness evidence must not depend on the
     // indexer's uptime; only the RPC (blockhash source) is a hard dependency of a beat.
-    const slot = await connection.getSlot();
-    const { blockhash } = await connection.getLatestBlockhash();
+    //
+    // slot + blockhash MUST come from ONE atomic RPC response: a real S8 E2E run produced 2/16
+    // entries whose getBlock(slot).blockhash mismatched, because getSlot() and
+    // getLatestBlockhash() are separate calls that can evaluate at different slots. The
+    // *AndContext variant returns {context:{slot}, value:{blockhash}} from a single evaluation,
+    // so the verifier's getBlock(slot) cross-check holds. Plain pair kept as fallback for
+    // injected fakes/older RPCs (their entries verify sig-only).
+    let slot;
+    let blockhash;
+    if (typeof connection.getLatestBlockhashAndContext === "function") {
+      const resp = await connection.getLatestBlockhashAndContext();
+      slot = resp.context.slot;
+      blockhash = resp.value.blockhash;
+    } else {
+      slot = await connection.getSlot();
+      ({ blockhash } = await connection.getLatestBlockhash());
+    }
     const entry = makeHeartbeatEntry({
       jobAddress,
       payer,
