@@ -149,3 +149,25 @@ test("maxCycles safety valve stops a lease that never terminates", async () => {
   assert.equal(result.cycles, 5);
   assert.equal(result.terminal.reason, "max-cycles");
 });
+
+test("atomic slot+blockhash: getLatestBlockhashAndContext preferred so slot always matches blockhash", async () => {
+  // Regression for a real S8 E2E finding: 2/16 entries failed the verifier's getBlock(slot)
+  // cross-check because slot and blockhash came from two separate RPC calls.
+  let calls = 0;
+  const h = loopHarness({
+    jobs: [makeRunningJob({ state: 2, jobStatus: "success" })],
+    connectionFactory: () => ({
+      getLatestBlockhashAndContext: async () => {
+        calls += 1;
+        return { context: { slot: 5000 + calls }, value: { blockhash: `atomic-${5000 + calls}` } };
+      },
+      // The non-atomic pair must NOT be used when the atomic variant exists:
+      getSlot: async () => { throw new Error("getSlot must not be called when AndContext exists"); },
+      getLatestBlockhash: async () => { throw new Error("getLatestBlockhash must not be called when AndContext exists"); },
+    }),
+  });
+  const result = await h.run();
+  assert.equal(result.heartbeats, 1);
+  assert.equal(h.appended[0].slot, 5001);
+  assert.equal(h.appended[0].blockhash, "atomic-5001");
+});

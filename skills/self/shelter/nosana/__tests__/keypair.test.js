@@ -11,6 +11,7 @@ import { promises as fsp } from "node:fs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import bs58 from "bs58";
 import { deriveAddressFromSecret, materializeKeypairFile, ensureNosanaKeypair } from "../keypair.mjs";
 
 const FIXTURE_SECRET_BASE58 = "XGWTVYQosP9baocV7vLADYZ9Jtz28Jqg9VSTxZzChmzi8GhD1rgFrZVgrPXbmFeNnVd8xUoKX1an1Ss2CECXq3C";
@@ -82,5 +83,25 @@ test("ensureNosanaKeypair fails closed with a secret-free message when no secret
   assert.throws(
     () => ensureNosanaKeypair({ home: "/no/such/home", env: {} }),
     /no Solana secret resolved/,
+  );
+});
+
+// S8 addition: NOSANA_KEYPAIR_PATH override — CLI identity can point at the capped sub-wallet
+// file. Never creates a wallet; fails closed on a missing/malformed file.
+test("ensureNosanaKeypair: NOSANA_KEYPAIR_PATH override loads that file's identity", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kp-ovr-"));
+  const bytes = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) bytes[i] = i + 1;
+  const p = path.join(dir, "sub_key.json");
+  fs.writeFileSync(p, JSON.stringify(Array.from(bytes)));
+  const out = ensureNosanaKeypair({ env: { NOSANA_KEYPAIR_PATH: p } });
+  assert.equal(out.keypairPath, p);
+  assert.equal(out.address, bs58.encode(bytes.subarray(32)));
+});
+
+test("ensureNosanaKeypair: NOSANA_KEYPAIR_PATH pointing nowhere fails closed", () => {
+  assert.throws(
+    () => ensureNosanaKeypair({ env: { NOSANA_KEYPAIR_PATH: "/nonexistent/sub_key.json" } }),
+    /missing or not a JSON byte array/,
   );
 });

@@ -84,6 +84,23 @@ export function materializeKeypairFile({ secretBytes, keypairPath }) {
  * @returns {{address: string, keypairPath: string}}
  */
 export function ensureNosanaKeypair({ env = process.env, home } = {}) {
+  // NOSANA_KEYPAIR_PATH override (S8/S12): point the CLI identity at an ALREADY-MATERIALIZED
+  // keypair file (e.g. the capped sub-wallet) instead of Franklin's canonical secret. The file
+  // must exist — this path never creates or falls back to a new wallet (constraint 2).
+  if (env.NOSANA_KEYPAIR_PATH) {
+    const overridePath = env.NOSANA_KEYPAIR_PATH;
+    let bytes;
+    try {
+      bytes = Uint8Array.from(JSON.parse(fs.readFileSync(overridePath, "utf8")));
+    } catch {
+      throw new Error("ensureNosanaKeypair: NOSANA_KEYPAIR_PATH is set but the file is missing or not a JSON byte array");
+    }
+    if (bytes.length !== SECRET_KEY_BYTE_LENGTH) {
+      throw new Error(`ensureNosanaKeypair: NOSANA_KEYPAIR_PATH file must contain ${SECRET_KEY_BYTE_LENGTH} bytes`);
+    }
+    const address = bs58.encode(bytes.subarray(SECRET_KEY_BYTE_LENGTH - PUBLIC_KEY_BYTE_LENGTH));
+    return { address, keypairPath: overridePath };
+  }
   const secret = resolveSolanaSecret({ home, env });
   if (!secret) {
     throw new Error(
