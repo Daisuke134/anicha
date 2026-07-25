@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.*
+*.key
+*.pem
+wallet.json
+solana.json
+solana-wallet.json
+nosana_key.json
+.solana-session
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+state/
+*.jsonl

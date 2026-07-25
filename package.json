@@ -1,0 +1,12 @@
+{
+  "name": "anicca-project",
+  "private": true,
+  "description": "Anicca monorepo; dev tooling at root",
+  "devDependencies": {
+    "@playwright/cli": "latest"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^5.0.0"
+  }
+}
