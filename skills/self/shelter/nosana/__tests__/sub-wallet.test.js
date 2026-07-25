@@ -85,3 +85,20 @@ test("ensureSubWallet: creates once, then loads the SAME key (idempotent)", () =
   assert.equal(second.address, first.address); // never silently rotates the cloud identity
   assert.equal(fs.statSync(first.keypairPath).mode & 0o777, 0o600);
 });
+
+// S12: USDC leg — Franklin's cloud identity needs capped USDC for BlockRun x402 calls.
+test("funding gate: USDC leg capped like the others", () => {
+  const ok = evaluateFundingGate({ ...BASE, requestUsdc: 0.025, ownerUsdcBalance: 0.0317 });
+  assert.equal(ok.allowed, true, ok.reason);
+  assert.equal(ok.usdc, 0.025);
+  const overCap = evaluateFundingGate({ ...BASE, requestUsdc: 0.02, subUsdcBalance: 0.02, ownerUsdcBalance: 0.05 });
+  assert.equal(overCap.allowed, false);
+  assert.match(overCap.reason, /USDC cap/);
+  const insufficientOwner = evaluateFundingGate({ ...BASE, requestUsdc: 0.05, ownerUsdcBalance: 0.03 });
+  assert.equal(insufficientOwner.allowed, false);
+});
+
+test("funding gate: USDC-only request is a valid request", () => {
+  const verdict = evaluateFundingGate({ ...BASE, requestNos: 0, requestSol: 0, requestUsdc: 0.01, ownerUsdcBalance: 0.03 });
+  assert.equal(verdict.allowed, true, verdict.reason);
+});

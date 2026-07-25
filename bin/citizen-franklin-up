@@ -1,0 +1,123 @@
+#!/usr/bin/env node
+// citizen-franklin-up — S12 thin entrypoint: put Franklin itself into a Nosana container paid by
+// the capped sub-wallet, via a CONFIDENTIAL post (secret env never touches public IPFS).
+//
+// Flow: build franklin job definition (sub-wallet secret as .solana-session) → validate → spend
+// gate against the SUB-WALLET's real balances (NOSANA_KEYPAIR_PATH override) → write intent →
+// spawn the detached long-lived poster (S13: poster must stay alive) → reconcile job address via
+// the jobs API (+ pid recorded for S14's kill-the-Mac-side test).
+//
+// Dry by default. --live actually posts.
+
+import fs from "node:fs";
+import path from "node:path";
+
+import { fetchMarkets, selectCheapestMarket, estimateJobCost, fetchNosUsdPriceLive } from "../skills/self/shelter/nosana/market.mjs";
+import { validateJobDefinition } from "../skills/self/shelter/nosana/job-definition.mjs";
+import { evaluateSpendGate, DEFAULT_MAX_SPEND_USD, DEFAULT_SOL_FEE_FLOOR } from "../skills/self/shelter/nosana/spend-gate.mjs";
+import { ensureSubWallet } from "../skills/self/shelter/nosana/sub-wallet.mjs";
+import { subWalletSecretBase58, buildFranklinJobDefinition } from "../skills/self/shelter/nosana/franklin-job.mjs";
+import { spawnConfidentialPost } from "../skills/self/shelter/nosana/confidential-post.mjs";
+import { reconcileNosanaJobViaApi, DEFAULT_RPC_URL } from "../skills/self/shelter/nosana/deploy.mjs";
+import { appendChild } from "../skills/self/spawn/lib/ledger.js";
+import { resolveStateDir } from "../skills/self/spawn/lib/state-path.js";
+
+const log = (l) => process.stdout.write(`[citizen-franklin-up] ${l}\n`);
+const args = process.argv.slice(2);
+const live = args.includes("--live");
+const durationMinutes = Number(process.env.NOSANA_JOB_DURATION_MINUTES || 10);
+
+try {
+  const env = process.env;
+  const sub = ensureSubWallet({ env });
+  log(`sub-wallet (payer + cloud identity): ${sub.address}`);
+
+  // Market + price + cost, same fail-closed path as deploy.mjs.
+  const markets = await fetchMarkets({});
+  const market = selectCheapestMarket(markets, { requireGpu: true });
+  if (!market) throw new Error("no eligible GPU market");
+  const nosUsdPrice = await fetchNosUsdPriceLive({});
+  const { usd: costUsd, nos: costNos } = estimateJobCost({ usdPerHour: market.usdPerHour, hours: durationMinutes / 60, nosUsdPrice });
+  log(`market ${market.address} @ $${market.usdPerHour}/hr — ${durationMinutes}min ≈ $${costUsd.toFixed(4)} (${costNos.toFixed(4)} NOS)`);
+
+  // Definition with the secret in env only.
+  const def = buildFranklinJobDefinition({ solanaSessionB58: subWalletSecretBase58({ env }) });
+  const v = validateJobDefinition(def);
+  if (!v.valid) throw new Error(`invalid definition: ${v.errors.join("; ")}`);
+  log("franklin job definition built + valid (secret via env only — MUST stay confidential)");
+
+  // Sub-wallet balances for the gate.
+  const w3 = await import("@solana/web3.js");
+  const conn = new w3.Connection(env.NOSANA_RPC_URL || env.SOLANA_RPC_URL || DEFAULT_RPC_URL, "confirmed");
+  const subPub = new w3.PublicKey(sub.address);
+  const solBalance = (await conn.getBalance(subPub)) / w3.LAMPORTS_PER_SOL;
+  const { NOS_MINT } = await import("../skills/self/shelter/nosana/market.mjs");
+  const resp = await conn.getParsedTokenAccountsByOwner(subPub, { mint: new w3.PublicKey(NOS_MINT) });
+  const nosBalance = resp.value.length ? resp.value[0].account.data.parsed.info.tokenAmount.uiAmount : 0;
+  log(`sub-wallet balances: ${solBalance} SOL, ${nosBalance} NOS`);
+
+  const gate = evaluateSpendGate({
+    costUsd, costNos, solBalance, nosBalance, history: [],
+    config: { perJobUsdCap: Number(env.NOSANA_MAX_SPEND_USD || DEFAULT_MAX_SPEND_USD), solFeeFloor: DEFAULT_SOL_FEE_FLOOR },
+    nowTs: Date.now() / 1000,
+  });
+  log(`spend gate: ${gate.allowed ? "ALLOWED" : "REFUSED"} — ${gate.reason}`);
+  if (!gate.allowed) process.exit(1);
+  if (!live) { log("(dry) stopping before post. Pass --live to actually post."); process.exit(0); }
+
+  const stateDir = resolveStateDir({ env });
+  fs.mkdirSync(stateDir, { recursive: true });
+  const nowTs = Math.floor(Date.now() / 1000);
+  const intentId = `${nowTs}-franklin-${market.address}`;
+  const jobDefFile = path.join(stateDir, `nosana-franklin-${intentId}.json`);
+  fs.writeFileSync(jobDefFile, JSON.stringify(def), { mode: 0o600 }); // contains the secret — 0600
+  const intentFile = path.join(stateDir, "nosana-deploy-intents.jsonl");
+  appendChild(intentFile, { ts: nowTs, intentId, status: "intent", address: sub.address, market: market.address, costUsd, costNos, durationMinutes, confidential: true });
+
+  const logPath = path.join(stateDir, `nosana-franklin-poster-${intentId}.log`);
+  const { pid } = spawnConfidentialPost({
+    marketAddress: market.address,
+    keypairPath: (env.NOSANA_KEYPAIR_PATH = env.NOSANA_KEYPAIR_PATH || sub.keypairPath),
+    jobDefFile, durationMinutes, network: env.NOSANA_NETWORK || "mainnet", logPath,
+  });
+  appendChild(intentFile, { ts: Date.now() / 1000, intentId, status: "poster-spawned", pid, logPath });
+  log(`confidential poster spawned (pid ${pid}, log ${logPath}) — reconciling job address…`);
+
+  let job = null;
+  for (let i = 0; i < 24 && !job; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    job = await reconcileNosanaJobViaApi({ posterAddress: sub.address, marketAddress: market.address, afterTs: nowTs - 5 });
+    if (!job) {
+      // S15 gap: ?payer= omits queued jobs. Fallback: newest List tx account probing via API GET.
+      // Transient RPC failures must not abort the loop — swallow per-iteration (fail-closed
+      // overall via the 24-iteration cap + post-unknown ledger row).
+      try {
+      const sigs = await (await fetch(`${env.NOSANA_RPC_URL || DEFAULT_RPC_URL}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSignaturesForAddress", params: [sub.address, { limit: 3 }] }) })).json();
+      for (const s of (sigs.result || [])) {
+        if (job) break;
+        const tx = await (await fetch(`${env.NOSANA_RPC_URL || DEFAULT_RPC_URL}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTransaction", params: [s.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }] }) })).json();
+        const keys = tx.result ? tx.result.transaction.message.accountKeys.map((k) => k.pubkey) : [];
+        for (const k of keys) {
+          if (k === sub.address) continue;
+          const r = await fetch(`https://dashboard.k8s.prd.nos.ci/api/jobs/${k}`);
+          if (r.ok) {
+            const j = await r.json();
+            // queued jobs carry timeStart 0/null (observed live); anything from this wallet in
+            // the last few signatures that the API recognizes as OUR payer is this post.
+            if (j && j.payer === sub.address && (!j.timeStart || j.timeStart >= nowTs - 10)) { job = j; break; }
+          }
+        }
+      } catch { /* transient RPC/API failure — next iteration retries */ }
+    }
+  }
+  if (!job || !job.address || job.address === sub.address) {
+    appendChild(intentFile, { ts: Date.now() / 1000, intentId, status: "post-unknown", errorMessage: "no job confirmed within 120s" });
+    throw new Error(`outcome UNKNOWN — check ${logPath} and the jobs API before any retry (poster pid ${pid} still running)`);
+  }
+  appendChild(intentFile, { ts: Date.now() / 1000, intentId, status: "posted", jobAddress: job.address, pid });
+  log(`posted confidential franklin job ${job.address} (poster pid ${pid} must stay alive until claim+delivery)`);
+  log(`next: bin/citizen-steward ${job.address} --interval 60`);
+} catch (err) {
+  process.stderr.write(`citizen-franklin-up: ${(err && err.message) || err}\n`);
+  process.exit(1);
+}

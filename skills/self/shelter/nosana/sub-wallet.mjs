@@ -28,6 +28,8 @@ import { resolveStateDir } from "../../spawn/lib/state-path.js";
 
 export const DEFAULT_NOS_CAP = 0.5; // ~$0.13 at $0.26/NOS — several 15-min leases, nothing more
 export const DEFAULT_SOL_CAP = 0.005; // fee + rent budget for the cloud key
+export const DEFAULT_USDC_CAP = 0.03; // BlockRun x402 budget (~2 gpt-5-mini calls at $0.011 each)
+export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SUBWALLET_FUNDING_LEDGER_BASENAME = "nosana-subwallet-funding.jsonl";
 
 function isPositiveFinite(v) {
@@ -42,18 +44,22 @@ function isPositiveFinite(v) {
 export function evaluateFundingGate({
   requestNos,
   requestSol,
+  requestUsdc,
   subNosBalance = 0,
   subSolBalance = 0,
+  subUsdcBalance = 0,
   ownerNosBalance = 0,
   ownerSolBalance = 0,
+  ownerUsdcBalance = 0,
   config = {},
 } = {}) {
   const nosCap = config.nosCap ?? DEFAULT_NOS_CAP;
   const solCap = config.solCap ?? DEFAULT_SOL_CAP;
+  const usdcCap = config.usdcCap ?? DEFAULT_USDC_CAP;
   const solFloor = config.solFeeFloor ?? DEFAULT_SOL_FEE_FLOOR;
 
-  if (!isPositiveFinite(requestNos) && !isPositiveFinite(requestSol)) {
-    return { allowed: false, reason: "nothing to fund: requestNos/requestSol must include a positive finite amount" };
+  if (!isPositiveFinite(requestNos) && !isPositiveFinite(requestSol) && !isPositiveFinite(requestUsdc)) {
+    return { allowed: false, reason: "nothing to fund: requestNos/requestSol/requestUsdc must include a positive finite amount" };
   }
   if (requestNos !== undefined && requestNos !== 0 && !isPositiveFinite(requestNos)) {
     return { allowed: false, reason: "requestNos must be a positive finite number (or 0 to skip the NOS leg)" };
@@ -61,8 +67,12 @@ export function evaluateFundingGate({
   if (requestSol !== undefined && requestSol !== 0 && !isPositiveFinite(requestSol)) {
     return { allowed: false, reason: "requestSol must be a positive finite number (or 0 to skip the SOL leg)" };
   }
+  if (requestUsdc !== undefined && requestUsdc !== 0 && !isPositiveFinite(requestUsdc)) {
+    return { allowed: false, reason: "requestUsdc must be a positive finite number (or 0 to skip the USDC leg)" };
+  }
   const nos = isPositiveFinite(requestNos) ? requestNos : 0;
   const sol = isPositiveFinite(requestSol) ? requestSol : 0;
+  const usdc = isPositiveFinite(requestUsdc) ? requestUsdc : 0;
 
   if (subNosBalance + nos > nosCap) {
     return {
@@ -76,8 +86,17 @@ export function evaluateFundingGate({
       reason: `sub-wallet would hold ${(subSolBalance + sol).toFixed(6)} SOL, exceeding the SOL cap ${solCap} — refusing`,
     };
   }
+  if (subUsdcBalance + usdc > usdcCap) {
+    return {
+      allowed: false,
+      reason: `sub-wallet would hold ${(subUsdcBalance + usdc).toFixed(6)} USDC, exceeding the USDC cap ${usdcCap} — refusing`,
+    };
+  }
   if (ownerNosBalance < nos) {
     return { allowed: false, reason: `owner holds ${ownerNosBalance} NOS, cannot send ${nos}` };
+  }
+  if (ownerUsdcBalance < usdc) {
+    return { allowed: false, reason: `owner holds ${ownerUsdcBalance} USDC, cannot send ${usdc}` };
   }
   if (ownerSolBalance - sol < solFloor) {
     return {
@@ -85,7 +104,7 @@ export function evaluateFundingGate({
       reason: `owner SOL would drop to ${(ownerSolBalance - sol).toFixed(6)}, below the fee floor ${solFloor}`,
     };
   }
-  return { allowed: true, reason: "within sub-wallet caps and owner floors", nos, sol };
+  return { allowed: true, reason: "within sub-wallet caps and owner floors", nos, sol, usdc };
 }
 
 /**
@@ -156,6 +175,7 @@ export async function fundSubWallet({
   live = false,
   requestNos,
   requestSol,
+  requestUsdc,
   rpcUrl = env.NOSANA_RPC_URL || env.SOLANA_RPC_URL || DEFAULT_RPC_URL,
   config = {},
   web3 = null,
@@ -180,31 +200,38 @@ export async function fundSubWallet({
 
   const conn = connection || new w3.Connection(rpcUrl, "confirmed");
   const nosMint = new w3.PublicKey(NOS_MINT);
+  const usdcMint = new w3.PublicKey(USDC_MINT);
   const subPub = new w3.PublicKey(sub.address);
 
   // Real balances for the gate.
   const ownerSol = (await conn.getBalance(owner.publicKey)) / w3.LAMPORTS_PER_SOL;
   const subSol = (await conn.getBalance(subPub)) / w3.LAMPORTS_PER_SOL;
-  async function nosBalanceOf(ownerPub) {
-    const resp = await conn.getParsedTokenAccountsByOwner(ownerPub, { mint: nosMint });
+  async function tokenBalanceOf(ownerPub, mint) {
+    const resp = await conn.getParsedTokenAccountsByOwner(ownerPub, { mint });
     if (!resp || !Array.isArray(resp.value) || resp.value.length === 0) return 0;
     const amount = resp.value[0].account.data.parsed.info.tokenAmount.uiAmount;
     return typeof amount === "number" ? amount : 0;
   }
-  const ownerNos = await nosBalanceOf(owner.publicKey);
-  const subNos = await nosBalanceOf(subPub);
+  const ownerNos = await tokenBalanceOf(owner.publicKey, nosMint);
+  const subNos = await tokenBalanceOf(subPub, nosMint);
+  const ownerUsdc = await tokenBalanceOf(owner.publicKey, usdcMint);
+  const subUsdc = await tokenBalanceOf(subPub, usdcMint);
   log(`balances: owner ${ownerSol} SOL / ${ownerNos} NOS, sub ${subSol} SOL / ${subNos} NOS`);
 
   const gate = evaluateFundingGate({
     requestNos,
     requestSol,
+    requestUsdc,
     subNosBalance: subNos,
     subSolBalance: subSol,
+    subUsdcBalance: subUsdc,
     ownerNosBalance: ownerNos,
     ownerSolBalance: ownerSol,
+    ownerUsdcBalance: ownerUsdc,
     config: {
       nosCap: Number(env.NOSANA_SUBWALLET_NOS_CAP || config.nosCap || DEFAULT_NOS_CAP),
       solCap: Number(env.NOSANA_SUBWALLET_SOL_CAP || config.solCap || DEFAULT_SOL_CAP),
+      usdcCap: Number(env.NOSANA_SUBWALLET_USDC_CAP || config.usdcCap || DEFAULT_USDC_CAP),
       solFeeFloor: config.solFeeFloor,
     },
   });
@@ -213,14 +240,14 @@ export async function fundSubWallet({
   const result = { owner: owner.publicKey.toBase58(), sub: sub.address, gate, sent: false, signatures: {} };
   if (!gate.allowed) return result;
   if (!live) {
-    log(`(dry) would send ${gate.sol} SOL + ${gate.nos} NOS to ${sub.address}. Stopping before any transfer.`);
+    log(`(dry) would send ${gate.sol} SOL + ${gate.nos} NOS + ${gate.usdc} USDC to ${sub.address}. Stopping before any transfer.`);
     return result;
   }
 
   const append =
     appendImpl || ((entry) => appendChild(path.join(resolveStateDir({ env }), SUBWALLET_FUNDING_LEDGER_BASENAME), entry));
   const ts = now() / 1000;
-  append({ kind: "subwallet-funding", status: "intent", ts, from: result.owner, to: sub.address, nos: gate.nos, sol: gate.sol });
+  append({ kind: "subwallet-funding", status: "intent", ts, from: result.owner, to: sub.address, nos: gate.nos, sol: gate.sol, usdc: gate.usdc });
 
   if (gate.sol > 0) {
     const tx = new w3.Transaction().add(
@@ -243,8 +270,17 @@ export async function fundSubWallet({
     result.signatures.nos = sig;
     log(`NOS leg confirmed: ${sig}`);
   }
+  if (gate.usdc > 0) {
+    const ownerAta = await spl.getOrCreateAssociatedTokenAccount(conn, owner, usdcMint, owner.publicKey);
+    const subAta = await spl.getOrCreateAssociatedTokenAccount(conn, owner, usdcMint, subPub);
+    // USDC has 6 decimals.
+    const raw = BigInt(Math.round(gate.usdc * 1_000_000));
+    const sig = await spl.transfer(conn, owner, ownerAta.address, subAta.address, owner, raw);
+    result.signatures.usdc = sig;
+    log(`USDC leg confirmed: ${sig}`);
+  }
 
-  append({ kind: "subwallet-funding", status: "settled", ts: now() / 1000, from: result.owner, to: sub.address, nos: gate.nos, sol: gate.sol, signatures: result.signatures });
+  append({ kind: "subwallet-funding", status: "settled", ts: now() / 1000, from: result.owner, to: sub.address, nos: gate.nos, sol: gate.sol, usdc: gate.usdc, signatures: result.signatures });
   result.sent = true;
   return result;
 }
