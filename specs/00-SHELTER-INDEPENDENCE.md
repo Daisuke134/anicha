@@ -26,7 +26,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | 2 | S8 | SPL Approve 委任 — spend 上限を Solana on-chain で強制。委任鍵が漏れても上限以上盗まれない。信頼できるサーバ不要の唯一の設計 | 未着手・最重要 |
 | 3 | S13 | `--confidential` job 実測 — ベンダー自身の秘密投入機構。definition が公開 IPFS に載らない。`--wait` 必須・ログはライブのみ。一度も未試行 | 未着手（S8 の代替/補完） |
 | 4 | S12 | Franklin 本体を Nosana へ（BASE_CHAIN_WALLET_KEY / CDP_API_KEY_* が要るので S8 or S13 が前提） | 未着手 |
-| 5 | S14 | Mac を落として生存を測る（独立の最終テスト） | S9+S8 の後 |
+| 5 | S14 | 独立の最終テスト — **Mac 全体は落とさない**（他の稼働系が載っているため）。Franklin/shelter 関連の Mac 側プロセスだけを停止し、Nosana 側が lease 更新・署名・応答を単独で続けることを実測。「Mac が消えても死なない」ことの証明であって、Mac を実際に消すことではない | S9+S8 の後 |
 
 ### B. 稼ぎ（$1.15/日 → 実 payout）
 
