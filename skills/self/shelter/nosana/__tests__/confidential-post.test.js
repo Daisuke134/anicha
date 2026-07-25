@@ -29,3 +29,13 @@ test("spawns detached nosana post with --confidential --wait, logs to file, no -
 test("refuses missing required params", () => {
   assert.throws(() => spawnConfidentialPost({ marketAddress: "M" }), /required/);
 });
+
+test("poster child gets the TTY shim via NODE_OPTIONS (moveCursor crash killed two live posters)", () => {
+  let seen = null;
+  const fake = (cmd, args, opts) => { seen = { cmd, args, opts }; return { pid: 1, unref() {} }; };
+  spawnConfidentialPost({
+    marketAddress: "M", keypairPath: "/k.json", jobDefFile: "/d.json", durationMinutes: 10,
+    logPath: path.join(os.tmpdir(), "poster-test2.log"), spawnImpl: fake,
+  });
+  assert.match(seen.opts.env.NODE_OPTIONS, /--require .*tty-shim\.cjs/);
+});

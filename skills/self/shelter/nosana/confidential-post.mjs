@@ -10,8 +10,15 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { buildPostArgs } from "./deploy.mjs";
+
+// TTY shim preloaded into the child (see shim/tty-shim.cjs): @nosana/cli crashes on piped
+// stdout at its post-display step, killing the p2p definition server the confidential job
+// depends on. Observed live twice; the shim no-ops the TTY calls.
+const TTY_SHIM_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "shim", "tty-shim.cjs");
 
 /**
  * Spawn the long-lived confidential poster. Returns {pid, args}. The child is detached +
@@ -35,7 +42,11 @@ export function spawnConfidentialPost({
     "--wait",
   ];
   const fd = fs.openSync(logPath, "a");
-  const child = spawnImpl("nosana", args, { detached: true, stdio: ["ignore", fd, fd] });
+  const child = spawnImpl("nosana", args, {
+    detached: true,
+    stdio: ["ignore", fd, fd],
+    env: { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --require ${TTY_SHIM_PATH}`.trim() },
+  });
   if (child && typeof child.unref === "function") child.unref();
   return { pid: child.pid, args };
 }
