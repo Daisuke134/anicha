@@ -201,6 +201,27 @@ export function validateJobAddressIsNotPayer({ jobAddress, payerAddress }) {
   return { valid: true, reason: "jobAddress is distinct from the payer wallet" };
 }
 
+
+/**
+ * Pure: argv for `nosana job post`. Exported for tests. `confidential` (S13) posts the job
+ * definition peer-to-peer to the picked node instead of pinning it to public IPFS — the ONLY
+ * stock mechanism that keeps env/secrets out of a world-readable definition. NEVER includes
+ * --api (constraint 1).
+ */
+export function buildPostArgs({ marketAddress, keypairPath, jobDefFile, durationMinutes, network, confidential = false }) {
+  const args = [
+    "job", "post",
+    "--market", marketAddress,
+    "--wallet", keypairPath,
+    "--file", jobDefFile,
+    "--timeout", String(durationMinutes),
+    "--network", network,
+    "--format", "json",
+  ];
+  if (confidential) args.push("--confidential");
+  return args;
+}
+
 /**
  * The full deploy orchestration. Every I/O dependency has a real default; tests override them.
  *
@@ -213,6 +234,7 @@ export function validateJobAddressIsNotPayer({ jobAddress, payerAddress }) {
 export async function deployNosanaJob({
   env = process.env,
   live = false,
+  confidential = env.NOSANA_JOB_CONFIDENTIAL === "1",
   image = env.NOSANA_JOB_IMAGE || DEFAULT_IMAGE,
   exposePort = Number(env.NOSANA_JOB_EXPOSE_PORT || DEFAULT_EXPOSE_PORT),
   durationMinutes = Number(env.NOSANA_JOB_DURATION_MINUTES || DEFAULT_DURATION_MINUTES),
@@ -357,15 +379,14 @@ export async function deployNosanaJob({
   try {
     stdout = execFileImpl(
       "nosana",
-      [
-        "job", "post",
-        "--market", market.address,
-        "--wallet", keypairPath,
-        "--file", jobDefFile,
-        "--timeout", String(durationMinutes),
-        "--network", network,
-        "--format", "json",
-      ],
+      buildPostArgs({
+        marketAddress: market.address,
+        keypairPath,
+        jobDefFile,
+        durationMinutes,
+        network,
+        confidential,
+      }),
       { encoding: "utf8" },
     );
   } catch (err) {

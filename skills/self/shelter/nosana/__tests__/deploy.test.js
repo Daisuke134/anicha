@@ -186,3 +186,17 @@ test("reconcileNosanaJobViaApi ignores a job entry with no address field rather 
   });
   assert.equal(result, null);
 });
+
+// S13: --confidential pass-through. The flag is the only stock mechanism keeping the job
+// definition off public IPFS; --api must never appear regardless.
+test("buildPostArgs: appends --confidential only when asked, never --api", async () => {
+  const { buildPostArgs } = await import("../deploy.mjs");
+  const base = { marketAddress: "M", keypairPath: "/k.json", jobDefFile: "/d.json", durationMinutes: 10, network: "mainnet" };
+  const plain = buildPostArgs(base);
+  assert.equal(plain.includes("--confidential"), false);
+  assert.equal(plain.includes("--api"), false);
+  const conf = buildPostArgs({ ...base, confidential: true });
+  assert.equal(conf[conf.length - 1], "--confidential");
+  assert.equal(conf.includes("--api"), false);
+  assert.deepEqual(conf.slice(0, -1), plain);
+});
