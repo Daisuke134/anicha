@@ -48,5 +48,6 @@ export function spawnConfidentialPost({
     env: { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --require ${TTY_SHIM_PATH}`.trim() },
   });
   if (child && typeof child.unref === "function") child.unref();
+  fs.closeSync(fd); // the child holds its own copy of the fd — parent's copy leaks otherwise
   return { pid: child.pid, args };
 }

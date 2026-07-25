@@ -89,6 +89,9 @@ try {
     job = await reconcileNosanaJobViaApi({ posterAddress: sub.address, marketAddress: market.address, afterTs: nowTs - 5 });
     if (!job) {
       // S15 gap: ?payer= omits queued jobs. Fallback: newest List tx account probing via API GET.
+      // Transient RPC failures must not abort the loop — swallow per-iteration (fail-closed
+      // overall via the 24-iteration cap + post-unknown ledger row).
+      try {
       const sigs = await (await fetch(`${env.NOSANA_RPC_URL || DEFAULT_RPC_URL}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSignaturesForAddress", params: [sub.address, { limit: 3 }] }) })).json();
       for (const s of (sigs.result || [])) {
         if (job) break;
@@ -99,10 +102,12 @@ try {
           const r = await fetch(`https://dashboard.k8s.prd.nos.ci/api/jobs/${k}`);
           if (r.ok) {
             const j = await r.json();
-            if (j && j.payer === sub.address && Number(j.timeStart || nowTs) >= 0 && (j.listedAt == null || j.listedAt >= nowTs - 10 || j.timeStart === 0)) { job = j; break; }
+            // queued jobs carry timeStart 0/null (observed live); anything from this wallet in
+            // the last few signatures that the API recognizes as OUR payer is this post.
+            if (j && j.payer === sub.address && (!j.timeStart || j.timeStart >= nowTs - 10)) { job = j; break; }
           }
         }
-      }
+      } catch { /* transient RPC/API failure — next iteration retries */ }
     }
   }
   if (!job || !job.address || job.address === sub.address) {
