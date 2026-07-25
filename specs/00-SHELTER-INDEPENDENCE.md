@@ -22,7 +22,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 | 順 | ID | 内容 | 状態 |
 |---|---|---|---|
-| 1 | S9 | 常駐化 — post して exit する現行を、lease 全期間ループへ。lease 中に伸びた timeout の再読含む。毎サイクル新しい blockhash で署名 = 「ずっと生きていた」の第三者検証可能な証拠。container 側も nginx でなく署名 loop を積む | 未着手（前会話の「走行中」はディスクに実体なし） |
+| 1 | S9 | 常駐化 — post して exit する現行を、lease 全期間ループへ。lease 中に伸びた timeout の再読含む。毎サイクル新しい blockhash で署名 = 「ずっと生きていた」の第三者検証可能な証拠 | 🔄 実装済み・E2E 走行中（2026-07-26）。branch `s9-steward`: heartbeat.mjs + steward.mjs + bin/citizen-steward、77/77 test green、adversary review PASS。live job `AnubczGS5FZmyqrEtv7AwJ2b7Ks1f7TTsYQ7HK2u3meo`（$0.012）に steward attach 済み — lease 完走 + `--verify` PASS で完了。container 側の署名 loop は S12 で Franklin 本体ごと載せる |
 | 2 | S8 | SPL Approve 委任 — spend 上限を Solana on-chain で強制。委任鍵が漏れても上限以上盗まれない。信頼できるサーバ不要の唯一の設計 | 未着手・最重要 |
 | 3 | S13 | `--confidential` job 実測 — ベンダー自身の秘密投入機構。definition が公開 IPFS に載らない。`--wait` 必須・ログはライブのみ。一度も未試行 | 未着手（S8 の代替/補完） |
 | 4 | S12 | Franklin 本体を Nosana へ（BASE_CHAIN_WALLET_KEY / CDP_API_KEY_* が要るので S8 or S13 が前提） | 未着手 |
@@ -52,6 +52,12 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | E8 / E9 | 24h・7+14日 生存計測 |
 | E1 | external — BLOCKED |
 | F1-scale | $5,000 まで凍結 |
+
+### 発見済みバグ（別タスク化済み）
+
+| ID | 内容 | 証拠 |
+|---|---|---|
+| S15 | reconcileNosanaJobViaApi の `?payer=` は state-0 (queued) job を返さない → post 成功でも "post-unknown" 誤判定。RPC の List tx から fallback 照合を足す | 実事故 2026-07-26: job `Anubcz…` / tx `5ZSpxbWP…`。chip task_07588a71 |
 
 ## 記事のゲート
 
