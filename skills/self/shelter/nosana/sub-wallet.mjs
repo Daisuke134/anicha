@@ -52,7 +52,6 @@ export function evaluateFundingGate({
   const solCap = config.solCap ?? DEFAULT_SOL_CAP;
   const solFloor = config.solFeeFloor ?? DEFAULT_SOL_FEE_FLOOR;
 
-  const wantsNos = requestNos !== 0 || requestSol === 0; // at least one leg must be a real request
   if (!isPositiveFinite(requestNos) && !isPositiveFinite(requestSol)) {
     return { allowed: false, reason: "nothing to fund: requestNos/requestSol must include a positive finite amount" };
   }
@@ -122,7 +121,12 @@ export function ensureSubWallet({ env = process.env, home } = {}) {
   }
   const keypairPath = path.join(effectiveHome, ".automaton", "nosana_subwallet_key.json");
   if (fs.existsSync(keypairPath)) {
-    const secretBytes = Uint8Array.from(JSON.parse(fs.readFileSync(keypairPath, "utf8")));
+    let secretBytes;
+    try {
+      secretBytes = Uint8Array.from(JSON.parse(fs.readFileSync(keypairPath, "utf8")));
+    } catch {
+      throw new Error("ensureSubWallet: existing sub-wallet file is unreadable or not a JSON byte array — refusing to overwrite; inspect it manually");
+    }
     if (secretBytes.length !== 64) {
       throw new Error("ensureSubWallet: existing sub-wallet file is malformed (not 64 bytes) — refusing to overwrite; inspect it manually");
     }
@@ -135,6 +139,11 @@ export function ensureSubWallet({ env = process.env, home } = {}) {
 }
 
 /**
+ * Known-accepted TOCTOU: balances are read, gated, then sent in separate steps — a concurrent
+ * funder could push the sub-wallet past cap between read and send. Accepted because this repo is
+ * the single funding path (one operator, one ledger) and every movement is journaled; revisit if
+ * funding ever becomes multi-process.
+ *
  * Live funding: gate on REAL balances, then move SOL (SystemProgram.transfer) and NOS (SPL
  * transfer, creating the sub ATA if needed) from Franklin's wallet to the sub-wallet. Records
  * intent BEFORE sending and settled rows (with tx signatures) after confirmation — at-most-once

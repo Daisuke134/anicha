@@ -29,7 +29,9 @@ function printHelp() {
 
 function argValue(args, flag) {
   const i = args.indexOf(flag);
-  return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
+  if (i === -1 || i + 1 >= args.length) return null;
+  const v = args[i + 1];
+  return v.startsWith("-") && Number.isNaN(Number(v)) ? null : v; // "--nos --sol 1" must not read "--sol" as the value
 }
 
 const args = process.argv.slice(2);
