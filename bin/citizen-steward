@@ -1,0 +1,120 @@
+#!/usr/bin/env node
+// citizen-steward — thin CLI entrypoint for the S9 steward loop (repo convention: bin/ stays
+// thin; the real logic is skills/self/shelter/nosana/steward.mjs + heartbeat.mjs).
+//
+// Two modes:
+//   citizen-steward <jobAddress> [--interval <sec>]
+//     Attach to an already-posted Nosana job and stay alive for the whole lease: re-read the
+//     job's timeout every cycle (lease extensions are picked up), sign a heartbeat over a fresh
+//     Solana blockhash each cycle, append to nosana-heartbeats.jsonl.
+//
+//   citizen-steward --verify <ledger.jsonl> [--job <jobAddress>] [--rpc]
+//     Third-party verification: check every entry's signature purely (no trust in this repo's
+//     state), optionally filtered to one job. --rpc additionally confirms each entry's blockhash
+//     really belongs to its claimed slot via getBlock(slot) — proving the entry could not have
+//     been built before that slot existed.
+
+import fs from "node:fs";
+
+import { stewardLoop, DEFAULT_INTERVAL_MS } from "../skills/self/shelter/nosana/steward.mjs";
+import { verifyHeartbeatEntry } from "../skills/self/shelter/nosana/heartbeat.mjs";
+import { DEFAULT_RPC_URL } from "../skills/self/shelter/nosana/deploy.mjs";
+
+function printHelp() {
+  process.stdout.write(
+    [
+      "Usage:",
+      "  citizen-steward <jobAddress> [--interval <sec>]     run the lease-long steward loop",
+      "  citizen-steward --verify <file> [--job <addr>] [--rpc]   verify a heartbeat ledger",
+      "",
+      "Env overrides: NOSANA_RPC_URL / SOLANA_RPC_URL, ANICCA_HOME, ANICCA_STATE_DIR.",
+      "",
+    ].join("\n"),
+  );
+}
+
+function argValue(args, flag) {
+  const i = args.indexOf(flag);
+  return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
+}
+
+const args = process.argv.slice(2);
+if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+  printHelp();
+  process.exit(args.length === 0 ? 2 : 0);
+}
+
+if (args.includes("--verify")) {
+  const file = argValue(args, "--verify");
+  const jobFilter = argValue(args, "--job");
+  const withRpc = args.includes("--rpc");
+  if (!file || !fs.existsSync(file)) {
+    process.stderr.write(`citizen-steward: --verify needs an existing file (got ${file})\n`);
+    process.exit(2);
+  }
+  const rows = fs
+    .readFileSync(file, "utf8")
+    .split("\n")
+    .map((l, i) => ({ raw: l, line: i + 1 })) // real file line numbers, computed BEFORE filtering
+    .filter(({ raw }) => raw.trim().length > 0)
+    .map(({ raw, line }) => {
+      try {
+        return { line, entry: JSON.parse(raw) };
+      } catch {
+        return { line, entry: null };
+      }
+    })
+    .filter((r) => !jobFilter || (r.entry && r.entry.jobAddress === jobFilter));
+
+  let pass = 0;
+  let fail = 0;
+  const connection = withRpc
+    ? new (await import("@solana/web3.js")).Connection(process.env.NOSANA_RPC_URL || process.env.SOLANA_RPC_URL || DEFAULT_RPC_URL, "confirmed")
+    : null;
+
+  for (const { line, entry } of rows) {
+    const verdict = entry ? verifyHeartbeatEntry(entry) : { valid: false, reason: "not parseable JSON" };
+    let rpcNote = "";
+    if (verdict.valid && connection) {
+      try {
+        const block = await connection.getBlock(entry.slot, { maxSupportedTransactionVersion: 0, transactionDetails: "none", rewards: false });
+        if (block && block.blockhash === entry.blockhash) {
+          rpcNote = " | rpc: blockhash matches slot";
+        } else {
+          verdict.valid = false;
+          verdict.reason = `rpc: getBlock(${entry.slot}) blockhash ${block ? block.blockhash : "unavailable"} != entry.blockhash`;
+        }
+      } catch (err) {
+        rpcNote = ` | rpc: getBlock(${entry.slot}) unavailable (${String((err && err.message) || err).slice(0, 60)}) — sig-only verdict`;
+      }
+    }
+    if (verdict.valid) {
+      pass += 1;
+      process.stdout.write(`line ${line}: PASS cycle=${entry.cycle} slot=${entry.slot}${rpcNote}\n`);
+    } else {
+      fail += 1;
+      process.stdout.write(`line ${line}: FAIL — ${verdict.reason}\n`);
+    }
+  }
+  process.stdout.write(`\nverified ${pass + fail} entries: ${pass} PASS, ${fail} FAIL\n`);
+  process.exit(fail === 0 && pass > 0 ? 0 : 1);
+}
+
+const jobAddress = args.find((a) => !a.startsWith("--") && a !== argValue(args, "--interval"));
+const intervalSec = Number(argValue(args, "--interval") || DEFAULT_INTERVAL_MS / 1000);
+if (!jobAddress) {
+  process.stderr.write("citizen-steward: jobAddress is required\n");
+  process.exit(2);
+}
+
+try {
+  const result = await stewardLoop({ jobAddress, intervalMs: intervalSec * 1000 });
+  process.stdout.write(
+    `steward finished: ${result.heartbeats} heartbeats over ${result.cycles} cycles (terminal: ${result.terminal.reason}, state=${result.terminal.state}, jobStatus=${result.terminal.jobStatus})\n`,
+  );
+  process.exit(0);
+} catch (err) {
+  // steward.mjs/keypair.mjs error messages never include secret material — safe to print.
+  process.stderr.write(`citizen-steward: ${(err && err.message) || err}\n`);
+  process.exit(1);
+}
