@@ -89,3 +89,51 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 - 実装: `skills/self/shelter/nosana/`（deploy.mjs / job-definition.mjs / market.mjs / spend-gate.mjs / keypair.mjs / funding/acquire-nos.mjs）
 - 制約 memory: nosana-shelter-hard-constraints（公開 IPFS・CLI extend/post 破損・no persistence）
 - Franklin: `@blockrun/franklin`（npm）、参照 `~/Projects/life-manager-8i-cutover/README.md:48`
+
+## D. Life Manager × Franklin — この技術の行き先（Dais 2026-07-26 裁定）
+
+**ここまでの S9-S14/S12c は部品であって製品ではない。製品は Life Manager。** 本 spec の shelter/compute 自活技術は、Life Manager に merge して「ユーザーの金を運用する cloud 常駐 agent」の土台にする。
+
+### 構造
+
+```
+ユーザー
+  │ USDC を預ける
+  ▼
+Life Manager（= manager / funder）
+  │ 資金を配分し、cap を決め、成績を見る
+  ├──────────┬──────────┐
+  ▼          ▼          ▼
+Franklin #1  Franklin #2  Franklin #N     ← 全員 cloud 常駐（Nosana 等）
+  各自の wallet を持つ / 各自で家賃と推論代を自費で払う / 各自が稼ぐ
+  │
+  └─ 稼ぎがユーザーへ戻る
+```
+
+- **Life Manager = Franklin の雇い主 兼 出資者 兼 管理者。** 1人が 1〜N 体の Franklin を持てる。
+- **ユーザーが送った USDC は Franklin へ流れる。** Franklin は Solana/Base 上の自分の wallet でそれを受け取り、それを元手に稼ぐ。
+- **Franklin は cloud にいる。** ユーザーの端末にも Dais の Mac にも依存しない（S12c/S14 で実証済みの経路をそのまま使う）。
+- **Life Manager 自身が Franklin になる道もある**（自分で稼ぐ）。あるいは Franklin の funder に徹する。両立可。
+
+### なぜこの技術が前提になるか
+
+| 本 spec で実証した部品 | Life Manager での役割 |
+|---|---|
+| S8 cap 付き sub-wallet | ユーザー資金を Franklin 単位で隔離。鍵漏洩時の損失をその Franklin の残高までに限定 |
+| S12c Base 子財布 + confidential env | 各 Franklin に「使ってよい額だけ」を安全に渡す配分機構そのもの |
+| S12/S14 cloud 常駐・Mac 非依存 | ユーザーの PC が落ちても Franklin は稼ぎ続ける（プロダクトとして必須） |
+| S9 heartbeat 署名 | 「あなたの Franklin は稼働していた」をユーザーに第三者検証可能な形で見せる |
+| S13 confidential | ユーザーの鍵・戦略を公開 IPFS に晒さない |
+| B群 稼ぎ rail（yield/PM/MM） | Franklin が実際に金を増やす手段 |
+
+### 未解決（設計判断が要る）
+
+1. **資金の預かり方**: ユーザー → Life Manager → Franklin の各段で誰が custody を持つか。non-custodial（ユーザーが自分の wallet から Franklin に直接送る）が最も安全で法的にも軽い。
+2. **成績の見せ方**: 各 Franklin の入金・支出・損益を on-chain で追える形で dashboard 化。heartbeat と同じ「自己申告でなく chain で検証」原則を貫く。
+3. **cap と停止権**: ユーザーがいつでも引き上げ・停止できること。cap はユーザーが握る唯一のノブ（理想 UX の核）。
+4. **複数 Franklin の分業**: 1体を yield、1体を trade、のように戦略で分けるか、同戦略で冗長化するか。
+5. **法的位置づけ**: 他人の資金を運用して収益を配る形は規制対象になり得る。non-custodial + ユーザー自身の wallet 主体の設計で回避できるかを要確認（未調査）。
+
+### done 条件（このセクション）
+
+Life Manager のユーザー1人が、自分の wallet から Franklin 1体に USDC を送り、その Franklin が cloud で自費稼働し、稼ぎがユーザーの wallet に戻る。全段が on-chain で検証可能。
