@@ -228,7 +228,11 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 **差し替え先 = GPU box を x402 で貸す**。理由: ①原価 $0.008/10分 に対し市場価格帯は $0.50〜$1.00（粗利 98%）②**confidential 経路・cap 付き子財布・自己延長を実際に通したのは我々だけ**（TTY shim / flat string cmd / poster 常駐 / cap=残高 / SDK extend の5つの非自明な壁を実測で解いた）③買い手＝「所有者のラップトップから逃げたいエージェント」で、x402 で払える相手そのもの。
 
-**MVP**: `POST /rent-a-box` に $0.50 を x402 決済 → Nosana に confidential job を post → 公開 URL を返す。done = 外部 wallet からの決済1件で box が立ち URL が 200 を返す。
+**MVP ✅ 達成 2026-07-27**: `POST /rent-a-box`（$0.50、live: `anicca-x402-discovery-production.up.railway.app`）。実測 E2E: 決済 **tx `0x0bc2fe2bef2e…` success** → service が Nosana に job **`Fnf4KFc6APBXw2kQ1XzQf8fFC8sSu1g2arDjoyY9NcLC`** を建て（payer = cap 付き sub-wallet `71Ffq…`、timeout 600）→ 返した公開 URL `https://2A5JG64j5rFL7aBL88FpJMEcWG5d7tSEUfhYDt2aAcmp.node.k8s.prd.nos.ci` が **HTTP 200**。**粗利 98%**（売価 $0.50 / 原価 $0.008）。
+
+実装: `apps/x402-agents/src/rent-a-box.mjs`（9/9 tests）+ server-lite への route/openapi 配線。設計要点: **借り手の box は我々の秘密を含まないので confidential 不要 → poster 常駐も不要 → web service から直接 post できる**（これが laptop 依存を切り離す鍵）。安全: 支払いは cap 付き sub-wallet（残高＝上限）、image は正規表現で検証、最大60分。潰したバグ: `Number(x || default)` が `durationMinutes:0` を default 10 に化けさせていた（`??` に修正）。
+
+**残 = 外部 buyer を呼ぶ**: ①x402scan の登録を新商品で更新 ②awesome-x402 等の一覧に載せる ③Bazaar 掲載を再確認。
 
 ### 鍵と wallet の対応（2026-07-27 実測、SDK 導出で確定）
 
