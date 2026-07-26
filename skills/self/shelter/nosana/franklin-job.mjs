@@ -16,7 +16,18 @@
 import bs58 from "bs58";
 import fs from "node:fs";
 
+import fsSrc from "node:fs";
+import { fileURLToPath } from "node:url";
+import pathSrc from "node:path";
+
 import { buildServiceJobDefinition } from "./job-definition.mjs";
+
+// The tool the agent runs inside the box. Read from disk so the container always gets the same
+// audited implementation this repo tests, never a re-typed copy that can drift.
+const BUY_HOUSE_SOURCE = fsSrc.readFileSync(
+  pathSrc.join(pathSrc.dirname(fileURLToPath(import.meta.url)), "..", "buy-house.mjs"),
+  "utf8",
+);
 import { ensureSubWallet } from "./sub-wallet.mjs";
 
 export const FRANKLIN_DEFAULT_MODEL = "openai/gpt-5-mini";
@@ -75,7 +86,12 @@ export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort
     // Base key: one HTTP call to BlockRun's Modal gateway, no Solana, no NOS, no confidential
     // channel, no posting process that has to stay alive. Writes the result to the proof page.
     ...(withBaseKey ? [
-      `cd /tmp/x402 && node -e 'const{wrapFetchWithPaymentFromConfig}=require("@x402/fetch"),{ExactEvmScheme}=require("@x402/evm/exact/client"),{privateKeyToAccount}=require("viem/accounts"),fs=require("fs");const a=privateKeyToAccount(process.env.BASE_KEY);const f=wrapFetchWithPaymentFromConfig(fetch,{schemes:[{network:"eip155:8453",client:new ExactEvmScheme(a)}]});f("https://blockrun.ai/api/v1/modal/sandbox/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({image:"python:3.11",timeout:300})}).then(async r=>{const t=await r.text();fs.appendFileSync("/tmp/proof.txt","\\n\\n=== SECOND HOUSE (BlockRun/Modal, Base x402) ===\\nHTTP "+r.status+"\\n"+t.slice(0,300)+"\\n")}).catch(e=>fs.appendFileSync("/tmp/proof.txt","\\nsecond house failed: "+String(e.message).slice(0,120)+"\\n"))' || true`,
+      // The agent is handed the VERB, not the result: buy-house.mjs is written into the box so the
+      // agent can sign its own lease whenever it decides to. Nobody outside places the order.
+      `cat > /tmp/x402/buy-house.mjs <<'BUYHOUSE'
+${BUY_HOUSE_SOURCE}
+BUYHOUSE`,
+      `cd /tmp/x402 && node buy-house.mjs 300 >> /tmp/house.json 2>&1; { echo ""; echo "=== HOUSE THE AGENT BOUGHT ITSELF ==="; cat /tmp/house.json; } >> /tmp/proof.txt || true`,
     ] : []),
     // S15: renew our OWN lease from inside the box. The platform injects no job id, and the
     // indexer's ?payer= view hides non-terminal jobs, so the container finds itself on-chain:
