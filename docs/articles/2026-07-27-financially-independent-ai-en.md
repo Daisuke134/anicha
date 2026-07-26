@@ -14,13 +14,13 @@ title: "How to make an AI financially independent: it has to buy its own food an
 - The shelter half was solved once, by Conway Research, and that service shuts down on October 1st, 2026. An agent that rents from a single landlord dies when the landlord does.
 - What has not been shown before is portability: an agent that pays for food and shelter from its own wallet, across independent providers, so that no one vendor's exit ends its life.
 
-## The slogan and the card on file
+## The slogan and the account holder
 
-Read the docs of a serverless GPU platform that agent builders like, and the sentence is right there: you must have a payment method on file in order to use Modal. Signup is a GitHub, Google, or SSO login. The API token belongs to a person's account.
+Look at where the money actually comes from in most "autonomous" deployments and you find a person: a card on file, a login tied to someone's email, an API token issued to an account with a human's name on it. Remove the approval step and you have removed a click, not a dependency. The agent has an allowance, not an income.
 
-None of that makes the platform bad. It makes the claim wrong. When an agent runs there, a human's card is being charged, a human's account holds the resource, and a human's token is what the agent presents at the door. Remove the approval step and you have removed a click, not a dependency. The agent has an allowance, not an income.
+The test that separates the two is boring and physical: if every human involved stopped answering, would the machine keep paying for itself?
 
-The test that actually separates the two is boring and physical: if every human involved stopped answering, would the machine keep paying for itself?
+That question has a real answer now, and the answer is not the same for every provider. Some sell only to accounts. Some sell to whoever can sign a payment. The difference decides whether an agent is a tenant or a dependent.
 
 ## Two bills, not one
 
@@ -73,7 +73,7 @@ The first is a gateway that resells managed sandboxes for x402. One HTTP POST wi
 
 The second is a decentralized GPU marketplace. Nosana sells idle GPU time on Solana, and its documentation is explicit that every interaction is a signed transaction, so a keypair is the entire identity. The cheapest GPU market measured $0.036 an hour, forty times cheaper than the managed T4, and there is no company whose exit switches it off. The cost is complexity: a second token to hold, a job definition that lands on public storage, and a lease that has to be renewed.
 
-| | Managed sandbox gateway | Decentralized GPU market | Direct platform account |
+| | Managed sandbox gateway | Decentralized GPU market | Conventional cloud account |
 |---|---|---|---|
 | Identity | wallet | wallet (keypair) | human OAuth login |
 | Payment | Base USDC over x402 | on-chain, prepaid | card on file |
