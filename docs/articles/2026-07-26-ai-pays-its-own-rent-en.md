@@ -1,10 +1,10 @@
 ---
 lane: B
 slug: ai-pays-own-rent-and-inference-en
-title: Autonomy was never an intelligence problem. It was a billing problem
+title: How to make an AI financially independent: it rents its own server and pays for its own thinking
 ---
 
-# Autonomy was never an intelligence problem. It was a billing problem
+# How to make an AI financially independent: it rents its own server and pays for its own thinking
 
 ## Summary
 
