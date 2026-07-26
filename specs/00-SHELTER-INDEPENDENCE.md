@@ -203,7 +203,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | rail | 現状（実測） | real にするための残作業 |
 |---|---|---|
 | **yield** | ✅ Fluid に $5.10 @5.36% = 月$0.02 | 元本を増やすしかない。$35/月には元本 $7,800。**単独では届かない**が土台として維持 |
-| **PM（Polymarket）** | 🟡 Fed ポジション **+$1.12** 含み益（curPrice 0.8325）、**決着 2026-07-29**。✅ **redeem 経路 verified 2026-07-27** | ①**7/29 に `redeem.py` を実行**（経路確認済み: `no redeemable conditions found — nothing to do` を正常返却）②✅ **allowance は既に MAX で解決済み**（実測 2026-07-27: spender `0xE1111800…`/`0xd91E80cF…`/`0xe2222d27…` すべて uint256 MAX）③✅ **資金もある: deposit wallet 内 collateral $8.24**（Polygon の raw USDC が 0 に見えたのは proxy 内 collateral だったため）④残りは cadence 化のみ |
+| **PM（Polymarket）** | 🟡 Fed ポジション **+$1.12** 含み益（curPrice 0.8325）、**決着 2026-07-29**。✅ **redeem 経路 verified 2026-07-27** | ①**7/29 に `redeem.py` を実行**（経路確認済み: `no redeemable conditions found — nothing to do` を正常返却）②✅ **allowance は既に MAX で解決済み**（実測 2026-07-27: spender `0xE1111800…`/`0xd91E80cF…`/`0xe2222d27…` すべて uint256 MAX）③✅ **資金もある: deposit wallet 内 collateral $8.24**（Polygon の raw USDC が 0 に見えたのは proxy 内 collateral だったため）④✅ **実 fill 達成 2026-07-27**: founder 鍵で LIVE run → `NAKED-FIX complete 8@0.168` が実約定。positions API 実測で **YES 8@0.6923 + NO 7.9761@0.1679** の2本 = 合計 **$0.86 で $1 が返る bundle** を保有（7/29 決着で市場リスクなしに +$1.12 確定）。**dry ゼロの実注文・実約定・on-chain 検証済み** ⑤残りは cadence 化（run.sh を定期実行に載せる）のみ |
 
 **★ PM が「壊れていた」ことは一度も無かった（2026-07-27 判明）★**: 過去の LIVE run が `allowance not enough` で落ちたのは、**別 instance の鍵で走らせていたから**（blockrun の proxy を見ていた）。founder 鍵で見ると registered=true・allowance MAX・collateral $8.24。**教訓: 複数 instance がある環境では、失敗を機能の欠陥と診断する前に「どの identity で走らせたか」を必ず確認する。**
 | **x402 売り** | 🟡 endpoint live + x402scan 登録済み + 自己決済1件 | 外部 buyer が来ていない。①価格/商品を見直す（$0.005 では月7,000 call 必要）②高単価サービスに変える ③Bazaar 掲載を再確認 |
