@@ -1,0 +1,42 @@
+{
+  "topic": "an AI that pays its own rent and inference",
+  "rules_applied": "SKILL.md タイトルの正本規則 4問 + TITLE PATTERNS 8型 + 数字はタイトルの徳ではない",
+  "ja": {
+    "rejected": [
+      {"t": "AIが自分で家賃と推論代を払い始めた。人間のカードを一枚も使わずに、どう成立しているのか", "type": "観測の要約", "reason": "何が起きたかを言っているだけで、反対する余地がない。しかも後半が『どう成立しているのか』で、読む前から解説記事だと分かってしまう", "cited_rule": "SKILL.md タイトルの正本規則 Q1 + 計測レポート型は禁則"},
+      {"t": "AIが自分で家賃を払う仕組み。10分1.2円、推論0.45円の内訳", "type": "具体数字", "reason": "数字は並んでいるが落差がない。値段表を見せられているだけで、読む理由にならない", "cited_rule": "SKILL.md 数字はタイトルの徳ではない"},
+      {"t": "x402とNosanaで、AIエージェントに経済的自立をさせる方法", "type": "how-to", "reason": "知らない単語が2つある。読む前に脱落する", "cited_rule": "SKILL.md Q4 + spec #77 B8"},
+      {"t": "AIエージェントの自律性を支える決済レイヤーの現在地", "type": "抽象名詞", "reason": "逆説がない抽象。読んでも何が得られるか分からない", "cited_rule": "SKILL.md 抽象語だけのタイトルは逆説を運んでいる限り可"},
+      {"t": "私が作ったAIは、自分で家賃を払えるようになった", "type": "一人称の成長記録", "reason": "書き手の話であって読者の問題ではない。読者に何も返らない", "cited_rule": "SKILL.md PLAYBOOK 1 Craft"},
+      {"t": "AIに財布を持たせたら、人間のパソコンが要らなくなった", "type": "因果", "reason": "「〜たら〜した」は体験談の形。主張として弱く、反対もできない", "cited_rule": "SKILL.md Q1"},
+      {"t": "自律型AIが夜中に止まる本当の理由", "type": "煽り", "reason": "答えを隠して引っぱるだけ。何が得られるか分からない", "cited_rule": "SKILL.md Q4"},
+      {"t": "AIの自立は、もう技術の問題ではない", "type": "通説否定", "reason": "方向は良いが漠然としすぎ。何の問題なのかが入っていないので、読者が次を読む理由が弱い", "cited_rule": "SKILL.md Q4"},
+      {"t": "エージェントが自分の家を借りる時代に、あなたのAIはまだ人のカードで動いている", "type": "二人称", "reason": "前半が『〜の時代に』という決まり文句で、読者を名指す後半の力を消している", "cited_rule": "SKILL.md 執筆プロセス 3（抽象語での開幕禁止）"}
+    ],
+    "shortlist": [
+      {"t": "あなたのAIが自律していない理由は、頭の良さではありません。あなたのカードで動いているからです", "type": "読者の直接名指し + 通説否定", "q1": "YES 賛否がある（自律を能力の問題だと思っている人は反対する）", "q2": "YES 実測で示せる", "q3": "YES 通説（賢さの問題）に逆らう", "q4": "YES 専門語ゼロ、得られるものが分かる"},
+      {"t": "AIを止めていたのは、知能ではなく請求書でした", "type": "通説の否定 → 本命の提示", "q1": "YES", "q2": "YES", "q3": "YES", "q4": "YES 専門語ゼロ。ただし『何が得られるか』はやや弱い"},
+      {"t": "1時間7円の家を、AIが自分で借りられるようになりました", "type": "具体数字 + 落差", "q1": "△ 主張というより出来事", "q2": "YES 実測", "q3": "△", "q4": "YES"}
+    ],
+    "chosen": {
+      "t": "あなたのAIが自律していない理由は、頭の良さではありません。あなたのカードで動いているからです",
+      "why": "4問すべてYES。読者を名指し（JPで最も強い型）、通説（賢さの問題）を否定し、専門語ゼロ。反対できる主張になっている"
+    }
+  },
+  "en": {
+    "rejected": [
+      {"t": "An AI is now paying its own rent and its own inference, without a single human credit card", "type": "observation summary", "reason": "states what happened; nothing to disagree with", "cited_rule": "SKILL.md title Q1"},
+      {"t": "How an AI pays for its own server", "type": "how-to label", "reason": "a label, not a claim; a stranger cannot tell what they gain", "cited_rule": "SKILL.md Q1/Q4"},
+      {"t": "Renting a GPU box for $0.008: the economics of self-funded agents", "type": "measurement report", "reason": "price-list headline, no tension", "cited_rule": "SKILL.md 計測レポート型は禁則"},
+      {"t": "I taught my AI to pay its own bills", "type": "first-person growth log", "reason": "the writer is the subject; nothing in it for the reader", "cited_rule": "SKILL.md PLAYBOOK 1 Craft"}
+    ],
+    "shortlist": [
+      {"t": "Autonomy was never an intelligence problem. It was a billing problem", "type": "箴言・逆説", "q1": "YES", "q2": "YES", "q3": "YES counter-narrative", "q4": "YES no jargon"},
+      {"t": "The smartest model on earth cannot buy itself a server. A dumber one with a wallet can", "type": "不可能の断言 → 反転", "q1": "YES", "q2": "YES", "q3": "YES", "q4": "YES"}
+    ],
+    "chosen": {
+      "t": "Autonomy was never an intelligence problem. It was a billing problem",
+      "why": "third-person paradox, the EN-strong form; counter-narrative; no jargon; disagreeable as a claim"
+    }
+  }
+}

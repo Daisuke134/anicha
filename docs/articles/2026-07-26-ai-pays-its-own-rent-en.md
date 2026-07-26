@@ -1,10 +1,10 @@
 ---
 lane: B
 slug: ai-pays-own-rent-and-inference-en
-title: An AI is now paying its own rent and its own inference, without a single human credit card
+title: Autonomy was never an intelligence problem. It was a billing problem
 ---
 
-# An AI is now paying its own rent and its own inference, without a single human credit card
+# Autonomy was never an intelligence problem. It was a billing problem
 
 ## Summary
 
