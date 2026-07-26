@@ -94,3 +94,18 @@ test('nothing written to the world-readable proof page can carry key material', 
     assert.match(line, /scrub\(|\[redacted\]/, `unscrubbed dynamic write: ${line.slice(0, 80)}`);
   }
 });
+
+test("the container renewer checks money before extending, not only the clock", () => {
+  const script = buildFranklinBootScript({
+    model: "m", maxSpendUsd: 0.02, prompt: "p", exposePort: 8080,
+    withBaseKey: true, withRenewer: true, leaseSecondsHint: 600,
+  });
+  // The guard must sit between the ceiling/margin test and the extend call — a floor placed after
+  // the spend is not a floor. This is the exact shape that let job AzUFmVa5 drain the wallet.
+  const guard = script.indexOf("const bal=await money()");
+  const extend = script.indexOf("sdk.jobs.extend(mine,ADD,false)");
+  assert.ok(guard > 0, "renewer has no balance check");
+  assert.ok(guard < extend, "the balance check must run BEFORE the extension is paid for");
+  assert.match(script, /RES=0\.34/);
+  assert.match(script, /nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7/);
+});
