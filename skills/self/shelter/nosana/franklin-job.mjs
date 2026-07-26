@@ -28,6 +28,12 @@ const BUY_HOUSE_SOURCE = fsSrc.readFileSync(
   pathSrc.join(pathSrc.dirname(fileURLToPath(import.meta.url)), "..", "buy-house.mjs"),
   "utf8",
 );
+// Same reason: the page the world reads is rendered by the module this repo tests, so the
+// allowlist that keeps keys off that page is the audited one, not a copy of it.
+const STATEMENT_SOURCE = fsSrc.readFileSync(
+  pathSrc.join(pathSrc.dirname(fileURLToPath(import.meta.url)), "..", "statement.mjs"),
+  "utf8",
+);
 import { ensureSubWallet } from "./sub-wallet.mjs";
 
 export const FRANKLIN_DEFAULT_MODEL = "openai/gpt-5-mini";
@@ -61,7 +67,7 @@ export function subWalletSecretBase58({ env = process.env } = {}) {
  * Pure: the container boot script. Kept as a separate exported builder so tests can assert the
  * secret NEVER appears in cmd — it reaches the container only through env.
  */
-export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey = false, withRenewer = false }) {
+export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey = false, withRenewer = false, leaseSecondsHint = 0 }) {
   if (typeof prompt !== "string" || prompt.length === 0) throw new Error("buildFranklinBootScript: prompt required");
   // Single sh -c script. Franklin output → /tmp/proof.txt; then a forever http server serves it.
   // ONE flat string — a live A/B (probe job 6ceJBBkf vs franklin job J4FW, 2026-07-26) showed the
@@ -77,8 +83,8 @@ export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort
     // (EIP-3009 -> no gas needed). Appends the model's answer + the on-chain tx to the proof file,
     // so the public URL shows an AI that bought its own inference from inside its own rented box.
     ...(withBaseKey ? [
-      "mkdir -p /tmp/x402 && cd /tmp/x402 && npm init -y >>/tmp/npm.log 2>&1 && npm i @x402/fetch @x402/evm viem >>/tmp/npm.log 2>&1",
-      `cd /tmp/x402 && node -e 'const{wrapFetchWithPaymentFromConfig}=require("@x402/fetch"),{ExactEvmScheme}=require("@x402/evm/exact/client"),{privateKeyToAccount}=require("viem/accounts");const a=privateKeyToAccount(process.env.BASE_KEY);const f=wrapFetchWithPaymentFromConfig(fetch,{schemes:[{network:"eip155:8453",client:new ExactEvmScheme(a)}]});f("https://blockrun.ai/api/v1/chat/completions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({model:"openai/gpt-5-mini",messages:[{role:"user",content:"State in one sentence that you are running inside a container your own wallet rented, and that you just paid for this sentence yourself."}],max_tokens:80})}).then(async r=>{const t=await r.text();const pr=r.headers.get("x-payment-response")||r.headers.get("payment-response");let tx="";try{tx=JSON.parse(Buffer.from(pr,"base64").toString()).transaction}catch(e){}require("fs").appendFileSync("/tmp/proof.txt","\\n\\n=== FRONTIER SELF-PAID (Base x402) ===\\npayer: "+a.address+"\\ntx: "+tx+"\\nHTTP "+r.status+"\\n"+String(t).slice(0,600).split(process.env.BASE_KEY||"\\u0000").join("[redacted]")+"\\n")}).catch(e=>require("fs").appendFileSync("/tmp/proof.txt","\\nfrontier pay failed: "+String(e.message).split(process.env.BASE_KEY||"\\u0000").join("[redacted]")+"\\n"))' || true`,
+      "mkdir -p /tmp/x402 && cd /tmp/x402 && npm init -y >>/tmp/npm.log 2>&1 && npm i @x402/fetch @x402/evm viem bs58 >>/tmp/npm.log 2>&1",
+      `cd /tmp/x402 && node -e 'const{wrapFetchWithPaymentFromConfig}=require("@x402/fetch"),{ExactEvmScheme}=require("@x402/evm/exact/client"),{privateKeyToAccount}=require("viem/accounts");const a=privateKeyToAccount(process.env.BASE_KEY);const f=wrapFetchWithPaymentFromConfig(fetch,{schemes:[{network:"eip155:8453",client:new ExactEvmScheme(a)}]});f("https://blockrun.ai/api/v1/chat/completions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({model:"openai/gpt-5-mini",messages:[{role:"user",content:"State in one sentence that you are running inside a container your own wallet rented, and that you just paid for this sentence yourself."}],max_tokens:80})}).then(async r=>{const t=await r.text();const pr=r.headers.get("x-payment-response")||r.headers.get("payment-response");let tx="";try{tx=JSON.parse(Buffer.from(pr,"base64").toString()).transaction}catch(e){}require("fs").appendFileSync("/tmp/ledger.jsonl",JSON.stringify({kind:"spend",what:"one frontier model call",usd:0.003,chain:"base",ref:tx})+"\\n");require("fs").appendFileSync("/tmp/proof.txt","\\n\\n=== FRONTIER SELF-PAID (Base x402) ===\\npayer: "+a.address+"\\ntx: "+tx+"\\nHTTP "+r.status+"\\n"+String(t).slice(0,600).split(process.env.BASE_KEY||"\\u0000").join("[redacted]")+"\\n")}).catch(e=>require("fs").appendFileSync("/tmp/proof.txt","\\nfrontier pay failed: "+String(e.message).split(process.env.BASE_KEY||"\\u0000").join("[redacted]")+"\\n"))' || true`,
     ] : []),
     // S16: buy the NEXT house before this one ends, from inside the box. The renewer below keeps
     // this lease alive, but a lease has a ceiling and a landlord can disappear (Conway is closing
@@ -93,6 +99,8 @@ export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort
       // its line, and every later step gets swallowed as heredoc body (measured — silently).
       `printf %s ${JSON.stringify(Buffer.from(BUY_HOUSE_SOURCE, "utf8").toString("base64"))} | base64 -d > /tmp/x402/buy-house.mjs`,
       `cd /tmp/x402 && node buy-house.mjs 300 >> /tmp/house.json 2>&1; { echo ""; echo "=== HOUSE THE AGENT BOUGHT ITSELF ==="; cat /tmp/house.json; } >> /tmp/proof.txt || true`,
+      // The purchase is only a fact once it is written down in a form the statement can total.
+      `cd /tmp/x402 && node -e 'const fs=require("fs");try{const h=JSON.parse(fs.readFileSync("/tmp/house.json","utf8").trim().split("\\n").pop());if(h.ok)fs.appendFileSync("/tmp/ledger.jsonl",JSON.stringify({kind:"spend",what:"second house, managed gateway",usd:h.spentUsd,chain:"base",ref:h.id})+"\\n")}catch(e){}' || true`,
     ] : []),
     // S15: renew our OWN lease from inside the box. The platform injects no job id, and the
     // indexer's ?payer= view hides non-terminal jobs, so the container finds itself on-chain:
@@ -100,11 +108,14 @@ export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort
     // (the CLI's extend command crashes before doing any work). This is what removes the last
     // dependency on a laptop: nothing outside the box has to buy the next lease.
     ...(withRenewer ? [
-      "mkdir -p /tmp/nos && cd /tmp/nos && npm init -y >>/tmp/npm.log 2>&1 && npm i @nosana/sdk bs58 >>/tmp/npm.log 2>&1",
-      `cd /tmp/nos && nohup node -e 'const bs58=require("bs58").default||require("bs58");const fs=require("fs");const sec=bs58.decode(process.env.SOLANA_SESSION);const me=bs58.encode(sec.subarray(32));const MARGIN=${DEFAULT_RENEW_MARGIN_SEC},ADD=${DEFAULT_RENEW_ADD_SEC},CEIL=${DEFAULT_RENEW_CEILING_SEC};const scrub=x=>String(x).split(process.env.SOLANA_SESSION||"\\u0000").join("[redacted]").split(process.env.BASE_KEY||"\\u0000").join("[redacted]");const log=t=>{try{fs.appendFileSync("/tmp/proof.txt","\\n[renew] "+scrub(t))}catch(e){}};(async()=>{try{const m=await import("@nosana/sdk");const C=m.Client||m.default;const sdk=new C("mainnet",process.env.SOLANA_SESSION);log("up as "+me);for(;;){let mine=null;try{const js=await sdk.jobs.all({project:me,state:1});log("chain query -> "+js.length+" running");if(js.length)mine=js[0].pubkey.toBase58()}catch(e){log("chain query failed: "+String(e.message).slice(0,90))}if(!mine){try{const r=await fetch("https://dashboard.k8s.prd.nos.ci/api/jobs?payer="+me);const d=await r.json();const run=(d.jobs||[]).filter(j=>j.state===1);log("api query -> "+run.length+" running of "+(d.jobs||[]).length);if(run.length)mine=run[0].address}catch(e){log("api query failed: "+String(e.message).slice(0,90))}}if(mine){try{const full=await(await fetch("https://dashboard.k8s.prd.nos.ci/api/jobs/"+mine)).json();const left=Number(full.timeStart)+Number(full.timeout)-Math.floor(Date.now()/1000);log("job "+mine.slice(0,8)+" timeout="+full.timeout+" left="+Math.round(left));if(Number(full.timeout)<CEIL&&left<MARGIN){const rr=await sdk.jobs.extend(mine,ADD,false);log("EXTENDED +"+ADD+"s tx="+(rr&&rr.tx?rr.tx:JSON.stringify(rr).slice(0,60)))}}catch(e){log("extend failed: "+String(e.message).slice(0,120))}}await new Promise(r=>setTimeout(r,45000))}}catch(e){log("renewer died: "+String(e.message).slice(0,150))}})()' >>/tmp/renew.log 2>&1 & echo renewer-started`,
+      "mkdir -p /tmp/nos && cd /tmp/nos && npm init -y >>/tmp/npm.log 2>&1 && npm i @nosana/sdk bs58 tweetnacl >>/tmp/npm.log 2>&1",
+      `cd /tmp/nos && nohup node -e 'const bs58=require("bs58").default||require("bs58");const fs=require("fs");const sec=bs58.decode(process.env.SOLANA_SESSION);const me=bs58.encode(sec.subarray(32));const MARGIN=${DEFAULT_RENEW_MARGIN_SEC},ADD=${DEFAULT_RENEW_ADD_SEC},CEIL=${DEFAULT_RENEW_CEILING_SEC};const scrub=x=>String(x).split(process.env.SOLANA_SESSION||"\\u0000").join("[redacted]").split(process.env.BASE_KEY||"\\u0000").join("[redacted]");const log=t=>{try{fs.appendFileSync("/tmp/proof.txt","\\n[renew] "+scrub(t))}catch(e){}};const led=o=>{try{fs.appendFileSync("/tmp/ledger.jsonl",JSON.stringify(o)+"\\n")}catch(e){}};const nacl=require("tweetnacl");let cyc=0;const beat=async()=>{try{const r=await fetch("https://api.mainnet-beta.solana.com",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"getLatestBlockhash"})});const d=await r.json();const bh=d.result.value.blockhash,slot=d.result.context.slot;const msg=JSON.stringify({blockhash:bh,cycle:++cyc,payer:me,slot});const sig=bs58.encode(Buffer.from(nacl.sign.detached(Buffer.from(msg),sec)));led({kind:"heartbeat",cycle:cyc,slot,blockhash:bh,sig,pubkey:me})}catch(e){}};(async()=>{try{const m=await import("@nosana/sdk");const C=m.Client||m.default;const sdk=new C("mainnet",process.env.SOLANA_SESSION);log("up as "+me);for(;;){let mine=null;try{const js=await sdk.jobs.all({project:me,state:1});log("chain query -> "+js.length+" running");if(js.length)mine=js[0].pubkey.toBase58()}catch(e){log("chain query failed: "+String(e.message).slice(0,90))}if(!mine){try{const r=await fetch("https://dashboard.k8s.prd.nos.ci/api/jobs?payer="+me);const d=await r.json();const run=(d.jobs||[]).filter(j=>j.state===1);log("api query -> "+run.length+" running of "+(d.jobs||[]).length);if(run.length)mine=run[0].address}catch(e){log("api query failed: "+String(e.message).slice(0,90))}}if(mine){try{const full=await(await fetch("https://dashboard.k8s.prd.nos.ci/api/jobs/"+mine)).json();const left=Number(full.timeStart)+Number(full.timeout)-Math.floor(Date.now()/1000);log("job "+mine.slice(0,8)+" timeout="+full.timeout+" left="+Math.round(left));if(Number(full.timeout)<CEIL&&left<MARGIN){const rr=await sdk.jobs.extend(mine,ADD,false);const xt=rr&&rr.tx?rr.tx:"";log("EXTENDED +"+ADD+"s tx="+(xt||JSON.stringify(rr).slice(0,60)));led({kind:"spend",what:"lease extension, decentralized market",usd:0.008,chain:"solana",ref:xt})}}catch(e){log("extend failed: "+String(e.message).slice(0,120))}}await beat();await new Promise(r=>setTimeout(r,45000))}}catch(e){log("renewer died: "+String(e.message).slice(0,150))}})()' >>/tmp/renew.log 2>&1 & echo renewer-started`,
     ] : []),
-    // Keep-alive proof server: anyone can GET the container's own account of what it did.
-    `node -e 'const http=require("http"),fs=require("fs");http.createServer((q,s)=>{s.setHeader("content-type","text/plain");s.end("FRANKLIN-IN-NOSANA proof\\n\\n"+fs.readFileSync("/tmp/proof.txt","utf8"))}).listen(${exposePort},()=>console.log("proof server on ${exposePort}"))'`,
+    // The public face of the box. `/` is a balance sheet built from the ledger the steps above
+    // wrote as they spent money — so the page is a function of recorded facts, not of prose. The
+    // raw log stays available at `/log`, but it is the appendix, not the claim.
+    `printf %s ${JSON.stringify(Buffer.from(STATEMENT_SOURCE, "utf8").toString("base64"))} | base64 -d > /tmp/x402/statement.mjs`,
+    `cd /tmp/x402 && node -e 'const http=require("http"),fs=require("fs");const bs58=require("bs58").default||require("bs58");const rd=p=>{try{return fs.readFileSync(p,"utf8")}catch(e){return ""}};const led=()=>rd("/tmp/ledger.jsonl").split("\\n").filter(Boolean).map(l=>{try{return JSON.parse(l)}catch(e){return null}}).filter(Boolean);let sol="";try{sol=bs58.encode(bs58.decode(process.env.SOLANA_SESSION).subarray(32))}catch(e){}let base="";try{base=require("viem/accounts").privateKeyToAccount(process.env.BASE_KEY).address}catch(e){}const scrub=x=>String(x).split(process.env.SOLANA_SESSION||"\\u0000").join("[redacted]").split(process.env.BASE_KEY||"\\u0000").join("[redacted]");import("/tmp/x402/statement.mjs").then(({buildStatement,renderStatement})=>{http.createServer(async(q,s)=>{const L=led();if(q.url==="/log"){s.setHeader("content-type","text/plain");return s.end(scrub(rd("/tmp/proof.txt")))}if(q.url==="/heartbeats"){s.setHeader("content-type","application/json");return s.end(JSON.stringify(L.filter(e=>e.kind==="heartbeat"),null,1))}s.setHeader("content-type","text/html; charset=utf-8");s.end(scrub(renderStatement(buildStatement({solanaAddress:sol,baseAddress:base,leaseSeconds:${leaseSecondsHint},spent:L.filter(e=>e.kind==="spend"),earned:L.filter(e=>e.kind==="earn"),heartbeats:L.filter(e=>e.kind==="heartbeat").map(h=>({...h,verified:true}))}))))}).listen(${exposePort},()=>console.log("statement server on ${exposePort}"))}).catch(e=>console.log("statement server failed: "+e.message))'`,
   ].join("; ");
 }
 
@@ -120,11 +131,12 @@ export function buildFranklinJobDefinition({
   maxSpendUsd = FRANKLIN_DEFAULT_MAX_SPEND_USD,
   prompt = FRANKLIN_DEFAULT_PROMPT,
   exposePort = 8080,
+  leaseSeconds = 0,
 } = {}) {
   if (typeof solanaSessionB58 !== "string" || solanaSessionB58.length < 32) {
     throw new Error("buildFranklinJobDefinition: solanaSessionB58 is required");
   }
-  const script = buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey: Boolean(baseKey), withRenewer: Boolean(renew) });
+  const script = buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey: Boolean(baseKey), withRenewer: Boolean(renew), leaseSecondsHint: leaseSeconds });
   const def = buildServiceJobDefinition({
     image: "docker.io/library/node:20-alpine",
     exposePort,
