@@ -54,3 +54,16 @@ test('definition with renew=true still keeps the secret out of cmd', () => {
   assert.equal(JSON.stringify(def.ops[0].args.cmd).includes(FAKE_SECRET), false);
   assert.equal(def.ops[0].args.env.SOLANA_SESSION, FAKE_SECRET);
 });
+
+test('boot script is valid /bin/sh — the provider wraps it in sh -c (regression: "&;" broke the renewer)', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  for (const withRenewer of [false, true]) {
+    const script = buildFranklinBootScript({ model: 'm', maxSpendUsd: 0.01, prompt: 'p', exposePort: 8080, withBaseKey: true, withRenewer });
+    const f = path.join(os.tmpdir(), `boot-${withRenewer}.sh`);
+    fs.writeFileSync(f, script);
+    execFileSync('/bin/sh', ['-n', f]); // throws on a syntax error
+  }
+});
