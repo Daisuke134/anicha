@@ -203,12 +203,23 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | rail | 現状（実測） | real にするための残作業 |
 |---|---|---|
 | **yield** | ✅ Fluid に $5.10 @5.36% = 月$0.02 | 元本を増やすしかない。$35/月には元本 $7,800。**単独では届かない**が土台として維持 |
-| **PM（Polymarket）** | 🟡 Fed ポジション +$0.89 含み益、**決着 2026-07-29** | ①7/29 に redeem → 現金化 ②CTF Exchange allowance 設定 ③cadence 化して実 fill を継続 |
+| **PM（Polymarket）** | 🟡 Fed ポジション **+$1.12** 含み益（curPrice 0.8325）、**決着 2026-07-29**。✅ **redeem 経路 verified 2026-07-27** | ①**7/29 に `redeem.py` を実行**（経路確認済み: `no redeemable conditions found — nothing to do` を正常返却）②CTF allowance の `invalid authorization` を解消 ③cadence 化 |
 | **x402 売り** | 🟡 endpoint live + x402scan 登録済み + 自己決済1件 | 外部 buyer が来ていない。①価格/商品を見直す（$0.005 では月7,000 call 必要）②高単価サービスに変える ③Bazaar 掲載を再確認 |
 | **Hummingbot MM** | ⏸ capital-gated | 運用資本 $100+ に到達したら着手 |
 | ✗ AutoHedge / Franklin-Trading / HL | 不採用（前者2つは執行コード無し、HL は Dais が OFF） | — |
 
 **done 条件**: 30日間の入金合計 ≥ $35 が on-chain または入金台帳で確認できる。
+
+### 鍵と wallet の対応（2026-07-27 実測、SDK 導出で確定）
+
+| instance | EOA | Polymarket proxy | 備考 |
+|---|---|---|---|
+| `~/.anicca-founder` | `0x810F6D61…` | **`0x904B50d2…`** | **勝ちポジションの持ち主**。Base USDC $4.99 も同じ EOA |
+| `~/.automaton` / `BLOCKRUN_WALLET_KEY` | `0xB9dd3B67…` | `0x5357AC61…` | HL account と同一 EOA |
+| `~/.blockrun` | `0x3EcCAD24…` | `0xda4b6E34…` | registered:true だが approve は `invalid authorization` |
+| `.polymarket.json` 記載 | signer `0x99b3fE…` | deposit `0x4c176db1…` | 上記いずれとも別。旧識別子 |
+
+**教訓**: `0x904B50` はローカルの EOA 鍵からは導出できない（proxy であって EOA ではない）。**SDK に deposit wallet を導出させて突合する**のが唯一の正しい特定法。
 
 ## F. 記事の状態（2026-07-26）
 
