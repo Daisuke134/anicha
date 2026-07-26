@@ -50,3 +50,38 @@ test('buyHouse: the cap is enforced before the network is touched', async () => 
   assert.equal(r.ok, false);
   assert.equal(called, false, 'must not call the landlord when the plan is over cap');
 });
+
+test('buyHouseOnNosana: pins a definition, lists the job, derives the public URL', async () => {
+  const { buyHouseOnNosana } = await import('../buy-house.mjs');
+  const sdkFactory = () => ({
+    ipfs: { pin: async () => 'QmHash' },
+    jobs: { list: async () => ({ job: 'CUcMnkzWL8RdNDtGw7pdbqE8xVawuPf2dUigQ3wS5qDs' }) },
+  });
+  const r = await buyHouseOnNosana({ solanaKey: 'x', seconds: 600, sdkFactory });
+  assert.equal(r.ok, true);
+  assert.equal(r.rail, 'nosana');
+  assert.match(r.url, /^https:\/\/[A-Za-z0-9]+\.node\.k8s\.prd\.nos\.ci$/);
+});
+
+test('buyHouseOnNosana: refuses absurd durations before touching the market', async () => {
+  const { buyHouseOnNosana } = await import('../buy-house.mjs');
+  let called = false;
+  const sdkFactory = () => { called = true; return {}; };
+  const r = await buyHouseOnNosana({ solanaKey: 'x', seconds: 5, sdkFactory });
+  assert.equal(r.ok, false);
+  assert.equal(called, false);
+});
+
+test('rentAnywhere: falls to the second landlord and reports who declined', async () => {
+  const { rentAnywhere } = await import('../buy-house.mjs');
+  const r = await rentAnywhere({
+    rails: ['nosana', 'modal'],
+    solanaKey: undefined,          // nosana rail cannot pay
+    baseKey: '0x' + '1'.repeat(64),
+    seconds: 300,
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ sandbox_id: 'sb-9', status: 'running' }) }),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.rail, 'modal');
+  assert.equal(r.attempts[0].ok, false);
+});

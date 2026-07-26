@@ -12,6 +12,9 @@
 // a hard per-call maximum stops a loop from emptying it in one pass.
 
 export const MODAL_CREATE_URL = 'https://blockrun.ai/api/v1/modal/sandbox/create';
+// Cheapest live GPU market measured 2026-07-27 ($0.04796/hr, ~40x under the managed T4 tier).
+export const NOSANA_DEFAULT_MARKET = '7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq';
+export const NOSANA_SDK_PATH = '/opt/homebrew/lib/node_modules/@nosana/cli/node_modules/@nosana/sdk/dist/index.js';
 export const DEFAULT_MAX_SPEND_USD = 0.50; // one call can never cost more than this
 
 /**
@@ -90,6 +93,73 @@ export async function buyHouse({
     spentUsd: plan.estimateUsd,
     config: j.config,
   };
+}
+
+/**
+ * The same verb, on the decentralized market. Everything that made this rail "complicated" —
+ * holding a second token, picking a market, pinning the definition, deriving the public URL — is
+ * exactly the work a tool is supposed to hide. From the caller's side this is one call, same as
+ * the managed rail; what you buy instead is a landlord nobody can switch off.
+ */
+export async function buyHouseOnNosana({
+  solanaKey = process.env.SOLANA_SESSION,
+  seconds = 600,
+  image = 'docker.io/library/nginx:alpine',
+  port = 8080,
+  cmd,
+  env,
+  market = NOSANA_DEFAULT_MARKET,
+  sdkPath = NOSANA_SDK_PATH,
+  sdkFactory,
+} = {}) {
+  if (!solanaKey && !sdkFactory) return { ok: false, reason: 'no Solana key to pay with' };
+  if (!Number.isInteger(seconds) || seconds < 60 || seconds > 86400) {
+    return { ok: false, reason: 'seconds must be an integer 60..86400' };
+  }
+
+  let sdk;
+  try {
+    sdk = sdkFactory ? sdkFactory() : new (await import(sdkPath)).Client('mainnet', solanaKey);
+  } catch (e) {
+    return { ok: false, reason: `no market client: ${String(e.message || e).slice(0, 100)}` };
+  }
+
+  const args = { image, expose: port, gpu: true };
+  if (cmd !== undefined) args.cmd = cmd; // flat string only — an array cmd dies on the node
+  if (env !== undefined) args.env = env;
+  const definition = { version: '0.1', type: 'container', ops: [{ type: 'container/run', id: 'rented', args }] };
+
+  try {
+    const ipfsHash = await sdk.ipfs.pin(definition);
+    const res = await sdk.jobs.list(ipfsHash, seconds, market);
+    const id = typeof res === 'string' ? res : res.job || res.address;
+    if (!id) return { ok: false, reason: 'the market accepted no job' };
+    const { getExposeIdHash } = await import(sdkPath);
+    return {
+      ok: true,
+      rail: 'nosana',
+      id,
+      url: `https://${getExposeIdHash(id, 0, port)}.node.k8s.prd.nos.ci`,
+      seconds,
+    };
+  } catch (e) {
+    return { ok: false, reason: `market refused: ${String(e.message || e).slice(0, 120)}` };
+  }
+}
+
+/**
+ * One verb, two landlords. Ask for a house; get whichever one answers, and see which declined.
+ * This is the whole point of the module: the caller never has to know that one rail needs a
+ * second token and the other needs a credit-card-free gateway.
+ */
+export async function rentAnywhere({ rails = ['nosana', 'modal'], ...opts } = {}) {
+  const attempts = [];
+  for (const rail of rails) {
+    const r = rail === 'nosana' ? await buyHouseOnNosana(opts) : await buyHouse(opts);
+    attempts.push({ rail, ok: r.ok, reason: r.reason });
+    if (r.ok) return { ...r, attempts };
+  }
+  return { ok: false, reason: attempts.map((a) => `${a.rail}: ${a.reason}`).join('; '), attempts };
 }
 
 /** CLI so an agent with a shell can just run it: `node buy-house.mjs [seconds] [gpu]`. */
