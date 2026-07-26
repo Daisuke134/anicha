@@ -51,7 +51,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | 6 | T2b | x402 discovery 登録 | ✅ **達成**。live `anicca-x402-discovery-production.up.railway.app/prompt-sanitizer`（payTo 0x6592, Base USDC $0.005, bazaar ext）、x402scan register 200 success（resource `3c716f96…`）。残 Task4 = self-buy で CDP Bazaar seeding（要 Base payer） |
 | 7 | E7 | Gig を banked | 🔄 実案件 coconala `17943244`（取引中・v23 納品済・acceptance PASS）。**正式納品/検収 2026-08-14**＝banked 予定。外部人間+未来日付で今は強制不能、loop 維持中。本筋外 |
 | 8 | **F1 yield** | Base 余剰を yield へ実 deploy | ✅ **達成・on-chain 検証済み 2026-07-26**。$5.10 USDC → **Fluid fUSDC 実着地（shares 4,536,729、5.36% APY、Base）**、$5 は compute reserve 温存。0x810f USDC $10.10→$5.00 を実測。loop の guard は "phantom" と誤検知したが on-chain の fUSDC share 残高で実着地を確認（＝self-report でなく chain で verify する規律が効いた）。**economy 初の real earning position・dry ゼロ**。※guard の phantom 誤検知は要修正（landing チェックが確定前に走る） |
-| 9 | **F2 PM 修理** | PM を実 fill に | 🔴 LIVE run.sh は実注文試行（dry でない）→ CTF Exchange allowance 未設定 + naked leg で fail-closed。done = allowance 設定→naked 解消→cadence 化→実 fill。要 Polygon 資金（bridge） |
+| 9 | **F2 PM** | PM を実 fill に | 🟡 **実態判明 2026-07-26: 壊れてない。資金ゼロ + 勝ち position が満期待ち**。naked wallet `0x904B50d2e214Da947d83D6a2D32c4E3Ffc17Eb74` が「Fed 7月会合 no change」を **8 shares @0.6923 → 現在 0.8035 = 含み益 +$0.89(+16%)**、**決着 2026-07-29**（redeemable=false）。PM 系 wallet（0x904B50/0x4c17/0x99b3）は全て **USDC $0** — allowance エラーは現金ゼロで新規 quote を出そうとした結果。done = ①7/29 決着 → redeem で ~$6.4 現金化（自動、待ち）②現金が入ったら allowance 設定 → cadence 化 → 実 fill。**今すぐ強制できるのは②の allowance 準備のみ、①は満期日待ち** |
 | 10 | **F3 Hummingbot** | KYC 不要 DEX connector で小額 MM | 未着手・導入 work。consistent 24/7 収入の柱 |
 | 11 | T2c | serve-mainnet.mjs 自己決済 | 要 gas |
 | 12 | S10 | bridge（片脚は撃たない） | Base $10.10 → 稼ぎ場（PM=Polygon 等）。frontier seed と x402 は Base 内完結 |
