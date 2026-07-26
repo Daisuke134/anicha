@@ -185,6 +185,31 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | Node に `globalThis.crypto` が無い環境がある | CDP SDK の Ed25519 JWT が `crypto is not defined` で死ぬ。`webcrypto` を global に注入 |
 | loop の自己申告は信用しない | yield loop が「phantom」と誤検知したが、on-chain の share 残高では**実着地していた**。判定は必ず chain 側で |
 
+## ★ 優先順位（Dais 裁定 2026-07-27）★
+
+**記事は後。金を稼ぐのが先。** 支出側（家賃・推論代・自己延長）は全部 real で閉じた。だが**収入は月$0**。稼ぎ loop を本物にするまで publish しない。
+
+| 順 | やること | なぜこの順か |
+|---|---|---|
+| **1** | **稼ぎ loop を real にする**（下記 G 節） | P2（自己負担）の唯一の壁。これが無いと記事の結論も弱いまま |
+| 2 | 冗長化（住処・餌の2社目） | 単一障害点2つを外す |
+| 3 | Life Manager merge 設計 | 製品化 |
+| 4 | 記事 publish | 1 が verified になってから。稼ぎの数字が入った記事の方が圧倒的に強い |
+
+## G. 稼ぎ loop を real にする（最優先）
+
+**目標**: Franklin 1体の月コスト ≈ $35（lease 24/7）を、Franklin 自身の稼ぎで賄う。
+
+| rail | 現状（実測） | real にするための残作業 |
+|---|---|---|
+| **yield** | ✅ Fluid に $5.10 @5.36% = 月$0.02 | 元本を増やすしかない。$35/月には元本 $7,800。**単独では届かない**が土台として維持 |
+| **PM（Polymarket）** | 🟡 Fed ポジション +$0.89 含み益、**決着 2026-07-29** | ①7/29 に redeem → 現金化 ②CTF Exchange allowance 設定 ③cadence 化して実 fill を継続 |
+| **x402 売り** | 🟡 endpoint live + x402scan 登録済み + 自己決済1件 | 外部 buyer が来ていない。①価格/商品を見直す（$0.005 では月7,000 call 必要）②高単価サービスに変える ③Bazaar 掲載を再確認 |
+| **Hummingbot MM** | ⏸ capital-gated | 運用資本 $100+ に到達したら着手 |
+| ✗ AutoHedge / Franklin-Trading / HL | 不採用（前者2つは執行コード無し、HL は Dais が OFF） | — |
+
+**done 条件**: 30日間の入金合計 ≥ $35 が on-chain または入金台帳で確認できる。
+
 ## F. 記事の状態（2026-07-26）
 
 draft 2本を `docs/articles/` に用意済み。**publish は全部仕上がってから**（Dais 指示）。
@@ -196,4 +221,8 @@ draft 2本を `docs/articles/` に用意済み。**publish は全部仕上がっ
 
 タイトル: 「AIが自分の財布でサーバー代を払う仕組み。どこまで動いて、何がまだ足りないのか」/ "How an AI pays for its own server. What already works, and what is still missing"
 
-**publish 前に更新が要る箇所**: 本文の「契約1本ぶんの生存」「24時間動き続ける状態とは距離がある」は **S15（lease extend 実証）で状況が変わった**。renew loop を container 内に移し終えたら、その節を実測で書き直す。
+**更新済み**: S15 達成に伴い「契約1本ぶんの生存」を削除し、「契約を自分で延長する」節（tx `2MQZhiR3…`、900→1500秒）を山場として追加。
+
+**タイトルは要再検討**（Dais 2026-07-27 却下）。却下の履歴は `docs/articles/title-candidates.json`。実データ（HN 高スコア）が示した勝ち型は「エージェントが具体的に何をやらかしたか」の事件型だが、Dais の指示は**事件型ではなく「どうやって成立させたか」型**。両者を満たす候補を再探索する。
+
+**publish は G 節（稼ぎ）が verified になってから**。稼ぎの数字が入った方が記事として強い。
