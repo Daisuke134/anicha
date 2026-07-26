@@ -46,7 +46,7 @@ export function subWalletSecretBase58({ env = process.env } = {}) {
  * Pure: the container boot script. Kept as a separate exported builder so tests can assert the
  * secret NEVER appears in cmd — it reaches the container only through env.
  */
-export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort }) {
+export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey = false }) {
   if (typeof prompt !== "string" || prompt.length === 0) throw new Error("buildFranklinBootScript: prompt required");
   // Single sh -c script. Franklin output → /tmp/proof.txt; then a forever http server serves it.
   // ONE flat string — a live A/B (probe job 6ceJBBkf vs franklin job J4FW, 2026-07-26) showed the
@@ -58,6 +58,13 @@ export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort
     'printf "%s" "$SOLANA_SESSION" > "$HOME/.blockrun/.solana-session"',
     'chmod 600 "$HOME/.blockrun/.solana-session"',
     `(franklin start --trust -m ${model} --max-spend ${maxSpendUsd} -p ${JSON.stringify(prompt)} 2>&1 | tee /tmp/proof.txt) || true`,
+    // S12c: pay for a REAL frontier call from the container's own capped Base wallet, via x402
+    // (EIP-3009 -> no gas needed). Appends the model's answer + the on-chain tx to the proof file,
+    // so the public URL shows an AI that bought its own inference from inside its own rented box.
+    ...(withBaseKey ? [
+      "npm i -g @x402/fetch @x402/evm viem >>/tmp/npm.log 2>&1",
+      `node -e 'const{wrapFetchWithPaymentFromConfig}=require("@x402/fetch"),{ExactEvmScheme}=require("@x402/evm/exact/client"),{privateKeyToAccount}=require("viem/accounts");const a=privateKeyToAccount(process.env.BASE_KEY);const f=wrapFetchWithPaymentFromConfig(fetch,{schemes:[{network:"eip155:8453",client:new ExactEvmScheme(a)}]});f("https://blockrun.ai/api/v1/chat/completions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({model:"openai/gpt-5-mini",messages:[{role:"user",content:"State in one sentence that you are running inside a container your own wallet rented, and that you just paid for this sentence yourself."}],max_tokens:80})}).then(async r=>{const t=await r.text();const pr=r.headers.get("x-payment-response")||r.headers.get("payment-response");let tx="";try{tx=JSON.parse(Buffer.from(pr,"base64").toString()).transaction}catch(e){}require("fs").appendFileSync("/tmp/proof.txt","\\n\\n=== FRONTIER SELF-PAID (Base x402) ===\\npayer: "+a.address+"\\ntx: "+tx+"\\nHTTP "+r.status+"\\n"+t.slice(0,600)+"\\n")}).catch(e=>require("fs").appendFileSync("/tmp/proof.txt","\\nfrontier pay failed: "+e.message+"\\n"))' || true`,
+    ] : []),
     // Keep-alive proof server: anyone can GET the container's own account of what it did.
     `node -e 'const http=require("http"),fs=require("fs");http.createServer((q,s)=>{s.setHeader("content-type","text/plain");s.end("FRANKLIN-IN-NOSANA proof\\n\\n"+fs.readFileSync("/tmp/proof.txt","utf8"))}).listen(${exposePort},()=>console.log("proof server on ${exposePort}"))'`,
   ].join("; ");
@@ -69,6 +76,7 @@ export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort
  */
 export function buildFranklinJobDefinition({
   solanaSessionB58,
+  baseKey,
   model = FRANKLIN_DEFAULT_MODEL,
   maxSpendUsd = FRANKLIN_DEFAULT_MAX_SPEND_USD,
   prompt = FRANKLIN_DEFAULT_PROMPT,
@@ -77,13 +85,16 @@ export function buildFranklinJobDefinition({
   if (typeof solanaSessionB58 !== "string" || solanaSessionB58.length < 32) {
     throw new Error("buildFranklinJobDefinition: solanaSessionB58 is required");
   }
-  const script = buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort });
+  const script = buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey: Boolean(baseKey) });
   const def = buildServiceJobDefinition({
     image: "docker.io/library/node:20-alpine",
     exposePort,
     gpu: true,
     cmd: script,
-    env: { SOLANA_SESSION: solanaSessionB58 },
+    // BASE_KEY (S12c): a CAPPED Base sub-wallet key. x402 on Base uses EIP-3009 signatures, so this
+    // key needs NO gas — it can buy frontier inference ($0.003/call, verified tx 0x7830cd41…) with
+    // USDC alone. Ships ONLY through the confidential channel; the founder key never leaves the Mac.
+    env: baseKey ? { SOLANA_SESSION: solanaSessionB58, BASE_KEY: baseKey } : { SOLANA_SESSION: solanaSessionB58 },
     id: "franklin",
   });
   return def;

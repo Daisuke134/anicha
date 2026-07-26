@@ -17,6 +17,7 @@ import { validateJobDefinition } from "../skills/self/shelter/nosana/job-definit
 import { evaluateSpendGate, DEFAULT_MAX_SPEND_USD, DEFAULT_SOL_FEE_FLOOR } from "../skills/self/shelter/nosana/spend-gate.mjs";
 import { ensureSubWallet } from "../skills/self/shelter/nosana/sub-wallet.mjs";
 import { subWalletSecretBase58, buildFranklinJobDefinition } from "../skills/self/shelter/nosana/franklin-job.mjs";
+import fsSync from "node:fs";
 import { spawnConfidentialPost } from "../skills/self/shelter/nosana/confidential-post.mjs";
 import { reconcileNosanaJobViaApi, DEFAULT_RPC_URL } from "../skills/self/shelter/nosana/deploy.mjs";
 import { appendChild } from "../skills/self/spawn/lib/ledger.js";
@@ -41,7 +42,15 @@ try {
   log(`market ${market.address} @ $${market.usdPerHour}/hr — ${durationMinutes}min ≈ $${costUsd.toFixed(4)} (${costNos.toFixed(4)} NOS)`);
 
   // Definition with the secret in env only.
-  const def = buildFranklinJobDefinition({ solanaSessionB58: subWalletSecretBase58({ env }) });
+  // S12c: also hand the container a CAPPED Base sub-wallet key so it can buy frontier inference
+  // with its own USDC via x402 (EIP-3009 => no gas). Optional: absent file => Solana-only job.
+  let baseKey;
+  try {
+    const bkPath = env.BASE_SUBWALLET_KEYFILE || `${env.ANICCA_HOME}/.automaton/base_subwallet_key.json`;
+    baseKey = JSON.parse(fsSync.readFileSync(bkPath, "utf8")).private_key;
+  } catch { baseKey = undefined; }
+  const def = buildFranklinJobDefinition({ solanaSessionB58: subWalletSecretBase58({ env }), baseKey });
+  log(baseKey ? "BASE_KEY present — container will self-pay frontier via x402" : "no BASE_KEY — Solana-only job");
   const v = validateJobDefinition(def);
   if (!v.valid) throw new Error(`invalid definition: ${v.errors.join("; ")}`);
   log("franklin job definition built + valid (secret via env only — MUST stay confidential)");
