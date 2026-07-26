@@ -242,6 +242,20 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 **残 = 外部 buyer の初決済**（自己決済でない1件）。
 
+### G3. 人間も俺も抜けた loop 3本（2026-07-27）
+
+| loop | 間隔 | 何を自分で決めるか | 検証 |
+|---|---|---|---|
+| `ai.anicca.pm-live-trade` | 1h | 市場を探し、裁定幅を判定し、実発注する | kickstart で実オーダー `0x7e1c111f4e` を確認 |
+| `ai.anicca.earn-watch` | 30m | ①外部売上の監視 ②**PM が redeemable になったら自分で redeem** ③Bazaar 掲載の確認 | 実行ログ `payee_usdc=0.605 pm_redeemable=0 bazaar_rentabox=yes` |
+| `ai.anicca.reinvest` | 6h | 余剰（残高 − 運転準備金 $3）が最低投入額 $1 を超えたら **自動で yield に入れる** | 実行で `yield_hold liquid=3.892 reserve=3`（$0.892 は最低額未満なので正しく見送り）|
+
+**redeem も再投資も、もう人間の判断を待たない。** 潰したバグ: launchd の PATH に `timeout` が無く reinvest script が即死していた（`timeout: command not found` → node 直呼びに変更）。
+
+**revenue の宛先を修正**: 売上受取が `0x6592`（**CDP 管理で秘密鍵がローカルに無い = 稼いでも動かせない**）だったため、payTo を **founder `0x810F6D61…`（鍵がディスクにある）** に変更。これで売上がそのまま再投資 loop の入力になる。
+
+**SOL 在庫についての訂正**: 「SOL 0.005 が在庫のボトルネック」は誤り。0.005 最低は **CLI の制約**であって、rent-a-box は **SDK 直呼び**なので手数料ぶん（~0.00001 SOL/tx）で足りる。実際 SOL 0.0045 で box 2台が建った。在庫の実制約は **NOS の escrow 0.3384/台**のみ（現在 1.089 = 3台ぶん）。
+
 ### 鍵と wallet の対応（2026-07-27 実測、SDK 導出で確定）
 
 | instance | EOA | Polymarket proxy | 備考 |
