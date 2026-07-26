@@ -51,7 +51,14 @@ try {
   } catch { baseKey = undefined; }
   // S15: --renew makes the container extend its OWN lease from inside (no laptop needed).
   const renew = args.includes("--renew") || env.NOSANA_RENEW === "1";
-  const def = buildFranklinJobDefinition({ solanaSessionB58: subWalletSecretBase58({ env }), baseKey, renew });
+  const def = buildFranklinJobDefinition({
+    solanaSessionB58: subWalletSecretBase58({ env }),
+    baseKey,
+    renew,
+    // The container cannot ask the platform how long it was rented for, so the lease it is about to
+    // be given is passed in — otherwise its own statement page cannot say what it is living in.
+    leaseSeconds: durationMinutes * 60,
+  });
   if (renew) log("renewer ON — the container will extend its own lease on-chain");
   log(baseKey ? "BASE_KEY present — container will self-pay frontier via x402" : "no BASE_KEY — Solana-only job");
   const v = validateJobDefinition(def);
