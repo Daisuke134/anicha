@@ -1,18 +1,18 @@
 ---
 lane: B
-slug: ai-pays-own-compute-and-shelter-en
-title: How an AI pays for its own server. What already works, and what is still missing
+slug: ai-pays-own-rent-and-inference-en
+title: An AI is now paying its own rent and its own inference, without a single human credit card
 ---
 
-# How an AI pays for its own server. What already works, and what is still missing
+# An AI is now paying its own rent and its own inference, without a single human credit card
 
 ## Summary
 
-- An AI cannot open a bank account. It can still buy compute, and the payments settle for real.
-- There are two separate bills: the inference itself, and the machine the code runs on. Paying both without a human credit card is the dividing line.
-- The payment layer sits on HTTP 402, a status code reserved in the 1990s and left empty until last year. With it, a private key replaces the API key.
-- Measured: ten minutes of a rented GPU box cost $0.008. One frontier-model exchange cost $0.003. Both leave a transaction hash on a public ledger.
-- What is missing is not money. It is continuity: renewing the lease before it expires still depends on a process running on someone's laptop.
+- An AI cannot open a bank account. It can still buy its own compute, rent its own machine, and extend that rental before it expires. All of it settles for real.
+- There are two bills: the inference, and the machine the code runs on. Neither one passed through a human credit card.
+- The payment layer sits on HTTP 402, a status code reserved in the 1990s and left empty until last year. A private key replaces the API key, and no identity check is involved.
+- Measured: ten minutes of a rented GPU box cost $0.008, one frontier-model exchange $0.003. Every payment leaves a transaction hash anyone can verify.
+- Turning off the human machine does not stop it. There is a transaction on the ledger where a running container decided, on its own, to extend its own lease.
 
 ## The "autonomous" agent that stops at 2am
 
@@ -126,7 +126,27 @@ An agent that claims autonomy should survive its owner's machine disappearing. W
 
 It kept answering 200, and the lease ran to completion and terminated normally. The laptop played no part.
 
-Honestly stated, this is survival for the length of one lease. Leases expire, so something has to buy the next one, and that piece still runs on the laptop. Between "ran one ten-minute lease to completion" and "runs indefinitely" there is still a gap.
+That leaves one question. Leases expire. Who buys the next one?
+
+## Extending the lease from inside
+
+A lease has an expiry. When it passes, the machine is gone and so is whatever was living on it. So after "it can pay" comes "it can top itself up before the clock runs out."
+
+The extension itself is one transaction: name the running lease, say how much time to add, sign with your own key. The hard part was that a running container **does not know which lease it is**. Decentralized markets do not tell the container its own job id.
+
+The way through is to work backwards from the wallet. The container holds its key. The key gives an address. Among the leases that address is paying for, the one currently running can only be this one.
+
+That is what happened. A watcher inside the container measured the remaining time every 45 seconds, and at 150 seconds left it signed an extension on its own judgment. The lease went from 900 seconds to 1500. The transaction hash is `2MQZhiR3hjCrBx25t2YfZwrKecEsNzXnBJRpW5T2gDoQvSzuJYGKyRZU3Vi4SSDEBcCXVwxtYnpARrYSvj2aF8Yj`. The laptop did nothing.
+
+```mermaid
+flowchart TD
+  A[container reads its own key] --> B[finds the lease that key pays for]
+  B --> C[measures the time left]
+  C --> D[signs an extension when it runs low]
+  D --> E[the lease grows, the same container lives on]
+```
+
+The brakes live in the same place. Each extension buys ten minutes and no more. A single lease is never auto-extended past six hours. And the balance itself is the ceiling: when the wallet is empty, it stops.
 
 ## Proving it was alive
 
@@ -138,17 +158,13 @@ Anyone can then verify two things independently: that the signature is genuine, 
 
 Measured over one lease: fourteen records, all fourteen passing both checks.
 
-## What is still missing
+## What is left
 
-The money was never the wall. If anything it is too small to be interesting: a frontier exchange for a third of a cent, an hour of GPU for five.
+Money was never the wall. If anything it is too small to be interesting: a frontier exchange for a third of a cent, an hour of GPU for five.
 
-Three things are missing.
+What is left is the income side. Running around the clock costs roughly $35 a month for the machine alone. Cover that from its own earnings and nothing needs topping up from outside. The selling endpoint is live and has taken a payment; an outside buyer has yet to arrive.
 
-Continuity. Renewing the lease still runs on the laptop. Until that moves, the human machine is not truly optional.
-
-Income. The spending path is open; the receiving path is thin. The endpoint is live and has taken a payment, but no outside buyer has arrived. It was just listed in a directory where buying agents look, so that number is still to be measured.
-
-Redundancy. Everything currently rides on one GPU marketplace and one model vendor. If either stops, it stops.
+The other one is redundancy. Everything currently rides on one GPU marketplace and one model vendor. If either stops, it stops. The same mechanics should work elsewhere, but only one of each has been proven.
 
 ## What changed anyway
 
