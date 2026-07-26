@@ -206,11 +206,29 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | **PM（Polymarket）** | 🟡 Fed ポジション **+$1.12** 含み益（curPrice 0.8325）、**決着 2026-07-29**。✅ **redeem 経路 verified 2026-07-27** | ①**7/29 に `redeem.py` を実行**（経路確認済み: `no redeemable conditions found — nothing to do` を正常返却）②✅ **allowance は既に MAX で解決済み**（実測 2026-07-27: spender `0xE1111800…`/`0xd91E80cF…`/`0xe2222d27…` すべて uint256 MAX）③✅ **資金もある: deposit wallet 内 collateral $8.24**（Polygon の raw USDC が 0 に見えたのは proxy 内 collateral だったため）④✅ **実 fill 達成 2026-07-27**: founder 鍵で LIVE run → `NAKED-FIX complete 8@0.168` が実約定。positions API 実測で **YES 8@0.6923 + NO 7.9761@0.1679** の2本 = 合計 **$0.86 で $1 が返る bundle** を保有（7/29 決着で市場リスクなしに +$1.12 確定）。**dry ゼロの実注文・実約定・on-chain 検証済み** ⑤✅ **loop 化 完了 2026-07-27**: `~/Library/LaunchAgents/ai.anicca.pm-live-trade.plist`（LIVE `run.sh`、`ANICCA_HOME=/Users/anicca/.anicca-founder` を env で固定、1時間ごと、log `~/.hermes/state/pm-live-trade.log`）。**kickstart で実発火を検証**: 市場 `Mubadala Citi DC Open` を YES 0.44 + NO 0.53 = 0.970（3.0% lock）と判定し、**YES 6@0.44 を実発注（ok=True status=live id=0x7e1c111f4e）**。NO 脚は `invalid post-only order: order crosses book` で拒否 = 板が動いた時の仕様どおりの挙動。**片脚は次パスの NAKED-FIX が閉じる = 自己修復ループとして噛み合っている**。旧 dry loop `ai.anicca.pm-decision-loop` は observe 専用のまま放置（LIVE はこちらが担当） |
 
 **★ PM が「壊れていた」ことは一度も無かった（2026-07-27 判明）★**: 過去の LIVE run が `allowance not enough` で落ちたのは、**別 instance の鍵で走らせていたから**（blockrun の proxy を見ていた）。founder 鍵で見ると registered=true・allowance MAX・collateral $8.24。**教訓: 複数 instance がある環境では、失敗を機能の欠陥と診断する前に「どの identity で走らせたか」を必ず確認する。**
-| **x402 売り** | 🟡 endpoint live + x402scan 登録済み + 自己決済1件 | 外部 buyer が来ていない。①価格/商品を見直す（$0.005 では月7,000 call 必要）②高単価サービスに変える ③Bazaar 掲載を再確認 |
+| **x402 売り** | 🔴 **商品が間違っていた（2026-07-27 市場実測で判明）** | 下記 G2 |
 | **Hummingbot MM** | ⏸ capital-gated | 運用資本 $100+ に到達したら着手 |
 | ✗ AutoHedge / Franklin-Trading / HL | 不採用（前者2つは執行コード無し、HL は Dais が OFF） | — |
 
 **done 条件**: 30日間の入金合計 ≥ $35 が on-chain または入金台帳で確認できる。
+
+### G2. x402 の商品を差し替える（2026-07-27）
+
+**市場実測**（CDP Bazaar 200件）: 中央値 $0.005 だが **平均 $5.05・17% が $0.05以上・最大 $1000**。高単価帯で実際に売れているもの:
+
+| 価格 | 売り物 |
+|---|---|
+| $1000 | 請求書決済（api.bitrefill.com） |
+| $1.00 | RPC アクセス（QuickNode）／agent 実行（Apify）／トークン購入 |
+| $0.50 | 株の判定・スクリーナー（stocktrends） |
+| $0.28 | 人物データ補完（stableenrich） |
+| $0.25 | ニュース取得 |
+
+**共通点 = 「エージェントが自分では作れないデータ／能力」**。我々の現行商品（PII マスク $0.005）は正規表現で誰でも自作できる commodity で、**買う理由が無い**。月$35 には 7,000 call 必要という時点で商品設計の失敗。
+
+**差し替え先 = GPU box を x402 で貸す**。理由: ①原価 $0.008/10分 に対し市場価格帯は $0.50〜$1.00（粗利 98%）②**confidential 経路・cap 付き子財布・自己延長を実際に通したのは我々だけ**（TTY shim / flat string cmd / poster 常駐 / cap=残高 / SDK extend の5つの非自明な壁を実測で解いた）③買い手＝「所有者のラップトップから逃げたいエージェント」で、x402 で払える相手そのもの。
+
+**MVP**: `POST /rent-a-box` に $0.50 を x402 決済 → Nosana に confidential job を post → 公開 URL を返す。done = 外部 wallet からの決済1件で box が立ち URL が 200 を返す。
 
 ### 鍵と wallet の対応（2026-07-27 実測、SDK 導出で確定）
 
