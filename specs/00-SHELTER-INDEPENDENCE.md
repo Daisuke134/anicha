@@ -90,50 +90,110 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 - 制約 memory: nosana-shelter-hard-constraints（公開 IPFS・CLI extend/post 破損・no persistence）
 - Franklin: `@blockrun/franklin`（npm）、参照 `~/Projects/life-manager-8i-cutover/README.md:48`
 
-## D. Life Manager × Franklin — この技術の行き先（Dais 2026-07-26 裁定）
+## D. Life Manager × Franklin — 製品の姿と最終形（Dais 2026-07-26 裁定）
 
-**ここまでの S9-S14/S12c は部品であって製品ではない。製品は Life Manager。** 本 spec の shelter/compute 自活技術は、Life Manager に merge して「ユーザーの金を運用する cloud 常駐 agent」の土台にする。
+### Q. Life Manager は Franklin 自身か、Franklin 群の管理者か
+
+**答え: 両方。ただし段階が違う。** Life Manager は「Franklin を雇う側」として始まり、最終的に「自分も Franklin である管理者」になる。
+
+- **管理者としての Life Manager**: ユーザーの USDC を受け取り、cap を決め、複数の Franklin に配分し、成績を見る。ユーザーから見た製品の顔。
+- **Franklin としての Life Manager**: 自分自身も cloud に住み、自分の家賃と推論代を自費で払う。人間の subscription に依存しない。
+
+前者だけだと「管理者は誰が養うのか」が残る。後者を satisfies して初めて自走する。
 
 ### 構造
 
 ```
-ユーザー
-  │ USDC を預ける
-  ▼
-Life Manager（= manager / funder）
-  │ 資金を配分し、cap を決め、成績を見る
-  ├──────────┬──────────┐
-  ▼          ▼          ▼
-Franklin #1  Franklin #2  Franklin #N     ← 全員 cloud 常駐（Nosana 等）
-  各自の wallet を持つ / 各自で家賃と推論代を自費で払う / 各自が稼ぐ
-  │
-  └─ 稼ぎがユーザーへ戻る
+ユーザー ──USDC──▶ Life Manager（管理者 兼 出資者。自身も cloud 常駐）
+                        │ 配分・cap・成績監視
+              ┌─────────┼─────────┐
+              ▼         ▼         ▼
+         Franklin#1  Franklin#2  Franklin#N   ← 全員 cloud 常駐
+         各自 wallet / 家賃と推論代を自費 / 各自が稼ぐ
+              └──── 稼ぎ ────▶ ユーザー
 ```
 
-- **Life Manager = Franklin の雇い主 兼 出資者 兼 管理者。** 1人が 1〜N 体の Franklin を持てる。
-- **ユーザーが送った USDC は Franklin へ流れる。** Franklin は Solana/Base 上の自分の wallet でそれを受け取り、それを元手に稼ぐ。
-- **Franklin は cloud にいる。** ユーザーの端末にも Dais の Mac にも依存しない（S12c/S14 で実証済みの経路をそのまま使う）。
-- **Life Manager 自身が Franklin になる道もある**（自分で稼ぐ）。あるいは Franklin の funder に徹する。両立可。
+### 最終形へのフェーズ（「全部無料になる」までの道筋）
 
-### なぜこの技術が前提になるか
+| Phase | 誰が払うか | 何が要るか | 現在地 |
+|---|---|---|---|
+| **P0 実験** | Dais が全額 | 部品の実証 | ✅ 完了。家(lease)も餌(frontier)も自費で払える経路を tx で実証（S12c/S15） |
+| **P1 有料製品** | ユーザーが subscription/USDC を払う | Life Manager が Franklin を cloud で回し、ユーザーの資金を運用して増やす | 🔄 ここへ向かう。custody 設計・dashboard・cap UI が要る |
+| **P2 自己負担** | Franklin の稼ぎが自分の家賃+推論代を上回る | 稼ぎ rail が黒字（yield/trade/x402 売上） | 未達。支出 rail は開通、収入 rail が細い |
+| **P3 自己増殖** | 余剰で新しい Franklin を建てる | 黒字 + 自動 spawn | 未着手 |
+| **P4 無料化** | ユーザーは払わない。Franklin の稼ぎが全コストを賄う | P2 の黒字が全ユーザー分をカバー | 最終形。ここで human credential も subscription も不要になる |
 
-| 本 spec で実証した部品 | Life Manager での役割 |
-|---|---|
-| S8 cap 付き sub-wallet | ユーザー資金を Franklin 単位で隔離。鍵漏洩時の損失をその Franklin の残高までに限定 |
-| S12c Base 子財布 + confidential env | 各 Franklin に「使ってよい額だけ」を安全に渡す配分機構そのもの |
-| S12/S14 cloud 常駐・Mac 非依存 | ユーザーの PC が落ちても Franklin は稼ぎ続ける（プロダクトとして必須） |
-| S9 heartbeat 署名 | 「あなたの Franklin は稼働していた」をユーザーに第三者検証可能な形で見せる |
-| S13 confidential | ユーザーの鍵・戦略を公開 IPFS に晒さない |
-| B群 稼ぎ rail（yield/PM/MM） | Franklin が実際に金を増やす手段 |
+**P4 の条件を数字で書く**: Franklin 1体の月コストは、lease を 24/7 で回して約 $35（$0.048/hr × 720h）+ 推論代。1体が月 $35 以上を安定して稼げば自己負担が成立し、それを超えた分がユーザーへの還元と新規 Franklin の原資になる。**現状の稼ぎは月 $0 なので、ここが唯一の壁。**
 
 ### 未解決（設計判断が要る）
 
-1. **資金の預かり方**: ユーザー → Life Manager → Franklin の各段で誰が custody を持つか。non-custodial（ユーザーが自分の wallet から Franklin に直接送る）が最も安全で法的にも軽い。
-2. **成績の見せ方**: 各 Franklin の入金・支出・損益を on-chain で追える形で dashboard 化。heartbeat と同じ「自己申告でなく chain で検証」原則を貫く。
-3. **cap と停止権**: ユーザーがいつでも引き上げ・停止できること。cap はユーザーが握る唯一のノブ（理想 UX の核）。
-4. **複数 Franklin の分業**: 1体を yield、1体を trade、のように戦略で分けるか、同戦略で冗長化するか。
-5. **法的位置づけ**: 他人の資金を運用して収益を配る形は規制対象になり得る。non-custodial + ユーザー自身の wallet 主体の設計で回避できるかを要確認（未調査）。
+1. **custody**: non-custodial（ユーザー自身の wallet から Franklin へ直接）が最も安全で法的にも軽い。
+2. **成績の見せ方**: 入出金と損益を on-chain で追える dashboard。「自己申告でなく chain で検証」を貫く。
+3. **cap と停止権**: ユーザーが握る唯一のノブ。いつでも引き上げ・停止できること。
+4. **複数 Franklin の分業**: 戦略別に分けるか、同戦略で冗長化するか。
+5. **法的位置づけ**: 他人の資金運用は規制対象になり得る。non-custodial 設計で回避できるか **未調査**。
 
 ### done 条件（このセクション）
 
-Life Manager のユーザー1人が、自分の wallet から Franklin 1体に USDC を送り、その Franklin が cloud で自費稼働し、稼ぎがユーザーの wallet に戻る。全段が on-chain で検証可能。
+ユーザー1人が自分の wallet から Franklin 1体に USDC を送り、その Franklin が cloud で自費稼働し、稼ぎがユーザーの wallet に戻る。全段 on-chain 検証可能。
+
+
+## E. 実測で得た全 gotcha（再発見コスト回避・2026-07-26）
+
+再検索すれば分かることでも、この一覧が無いと毎回同じ壁に当たる。全て実測。
+
+### Nosana / shelter
+| 事実 | 詳細 |
+|---|---|
+| escrow は duration 非依存 | 10分でも15分でも **0.3384 NOS 固定**で押さえられる。未使用分は終了時に返る |
+| CLI は最低 0.005 SOL を要求 | 残高がそれ未満だと post 自体を拒否（gate とは別の CLI 側チェック） |
+| `--confidential` は poster 常駐必須 | 定義は poster→node の HTTP POST（`postJobDefinitionUntilSuccess`）で渡る。poster が死ぬと node は `waiting-for-job-definition` で終了 |
+| 公開 IPFS には stub のみ | confidential 時 CID の中身は `ops:[]` + `logistics: api-listen`。両 gateway で実測 |
+| container の `cmd` は **flat string 必須** | `["sh","-c",script]` の array 形は node 側で ~3s 死ぬ。A/B 実証済み |
+| CLI は piped stdout で crash | `process.stdout.moveCursor` を呼ぶ。`NODE_OPTIONS --require shim/tty-shim.cjs` で no-op 化して根治 |
+| `nosana job extend` CLI は壊れている | `extend/action.js:23` が undefined の `config.network.includes()` を呼ぶ。**SDK 直呼び `jobs.extend()` は動く**（renew.mjs） |
+| `?payer=` API は queued job を隠す | state 0 の job が返らない。reconcile は RPC の List tx から補完が要る（S15 バグとして chip 化済み） |
+| service URL は決定的 hash | `getExposeIdHash(jobAddress, opIndex, port)` + `.node.k8s.prd.nos.ci` で導出可 |
+| SPL Approve 委任は使えない | nosana-jobs `list.rs` が支払い元を poster 自身の ATA に固定。cap は「残高そのもの」で担保するしかない |
+
+### x402 / 支払い
+| 事実 | 詳細 |
+|---|---|
+| BlockRun に**デポジット床は無い** | Base の x402 で **$0.003/call**（402 header: eip155:8453 / USDC / amount 3000 / payTo 0xe9030014…）。「$5 床」は誤情報だった |
+| cloud 鍵に **gas 不要** | x402 は EIP-3009（署名だけで送金委任、手数料は受取側負担）。対象トークンだけ持たせればよい |
+| 402 の中身は **header** にある | body は `{}`。`PAYMENT-REQUIRED` を base64 decode すると payTo/accepts/extensions が出る |
+| client config の形 | `wrapFetchWithPaymentFromConfig(fetch, {schemes:[{network, client: new ExactEvmScheme(account)}]})`。scheme を裸で渡すと落ちる |
+
+### x402 discovery 登録（x402scan）
+| 事実 | 詳細 |
+|---|---|
+| register は `POST https://www.x402scan.com/api/x402/registry/register` body `{url}` | SIWX 認証必須 |
+| **署名者 = payTo である必要は無い** | submitter-auth であって所有証明ではない（throwaway EVM 鍵で通過を実証） |
+| 署名する文字列 | EIP-4361/SIWE plaintext。**chainId は数値 `8453`**（header payload 側は CAIP 文字列 `eip155:8453`） |
+| 提出方法 | 同じ body + header `SIGN-IN-WITH-X: base64(JSON payload)`。payload = challenge の全 info + address + signature |
+| 時間制約 | issuedAt から 5分・nonce は single-use。取得〜提出を1スクリプトで完結させる |
+| `no_discovery` の真因 | resource は probe されない。**`GET {origin}/openapi.json`** を取りに来て OpenAPI doc の `x-payment-info` を読む（@agentcash/discovery 1.7.5） |
+| openapi.json の必須形 | `openapi`/`info.title`/`info.version`/`paths` + 該当 path の `x-payment-info.price = {mode:"fixed", amount, currency}` |
+| CDP Bazaar は settlement-driven | 初回決済後に index される。read API は `GET https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources`（無認証） |
+
+### 運用一般
+| 事実 | 詳細 |
+|---|---|
+| `npm i -g` は node の解決パスに乗らない | container 内では専用ディレクトリにローカル install し、その cwd で実行する |
+| Railway の env は `--service` 必須 | 付けないと silent に無視され、app が起動時 env 欠落で死ぬ |
+| Railway `npm ci` は lock 不整合で落ちる | `nixpacks.toml` で install phase を `npm install` に上書き |
+| Node に `globalThis.crypto` が無い環境がある | CDP SDK の Ed25519 JWT が `crypto is not defined` で死ぬ。`webcrypto` を global に注入 |
+| loop の自己申告は信用しない | yield loop が「phantom」と誤検知したが、on-chain の share 残高では**実着地していた**。判定は必ず chain 側で |
+
+## F. 記事の状態（2026-07-26）
+
+draft 2本を `docs/articles/` に用意済み。**publish は全部仕上がってから**（Dais 指示）。
+
+| 言語 | ファイル | 字数 | gate |
+|---|---|---|---|
+| JP | `2026-07-26-ai-pays-its-own-rent-jp.md` | 15.9k | slop 0 / AI 自己申告 0 / 内部パス 0 |
+| EN | `2026-07-26-ai-pays-its-own-rent-en.md` | 11.6k | em-dash 0 / 同上 |
+
+タイトル: 「AIが自分の財布でサーバー代を払う仕組み。どこまで動いて、何がまだ足りないのか」/ "How an AI pays for its own server. What already works, and what is still missing"
+
+**publish 前に更新が要る箇所**: 本文の「契約1本ぶんの生存」「24時間動き続ける状態とは距離がある」は **S15（lease extend 実証）で状況が変わった**。renew loop を container 内に移し終えたら、その節を実測で書き直す。
