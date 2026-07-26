@@ -232,7 +232,15 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 実装: `apps/x402-agents/src/rent-a-box.mjs`（9/9 tests）+ server-lite への route/openapi 配線。設計要点: **借り手の box は我々の秘密を含まないので confidential 不要 → poster 常駐も不要 → web service から直接 post できる**（これが laptop 依存を切り離す鍵）。安全: 支払いは cap 付き sub-wallet（残高＝上限）、image は正規表現で検証、最大60分。潰したバグ: `Number(x || default)` が `durationMinutes:0` を default 10 に化けさせていた（`??` に修正）。
 
-**残 = 外部 buyer を呼ぶ**: ①x402scan の登録を新商品で更新 ②awesome-x402 等の一覧に載せる ③Bazaar 掲載を再確認。
+**価格を市場に合わせた（2026-07-27）**: 競合 **AgentMetal**（agentmetal.dev、awesome-x402 掲載）が Linux VPS を **$1.20/日**で貸している。我々の $0.50/10分 は日額換算 **$72 = 60倍高い**（しかも我々の原価 $1.15/日 ≈ 相手の売価）。→ **$0.10/10分 に値下げ**（原価比12倍・粗利92%）、live 実測で 402 amount=100000 を確認。差別化は価格でなく **①GPU（相手は CPU）②Solana 財布も NOS も不要で Base USDC 1回で URL が返る③秒で使える（SSH 不要）**。
+
+**露出（done）**: ①x402scan に box 商品を登録（`27d2e00c…`、HTTP 200 success）②**awesome-x402 に掲載 PR** → https://github.com/xpaysh/awesome-x402/pull/1012（268★・買い手が実際に見に来る一覧）③CDP Bazaar は掲載確認済みだが**旧商品のみ**（box の決済後の index 待ち）。小規模一覧（3★/7★/0★）は労力に見合わないため見送り。
+
+**経済の実測（2026-07-27）**: 受取 wallet `0x6592` の USDC = **$0.605**（$0.005+$0.50+$0.10 の3決済）。在庫消費は sub-wallet NOS 0.449（≈$0.117、大半は escrow で終了時に返る）→ **粗利 96%+**。※全て自己決済なので INV-7 により「稼ぎ」には計上しない。商品が値段どおり動く証明として扱う。
+
+**在庫の制約（実務の穴、発見 2026-07-27）**: box 1台に escrow **0.3384 NOS** + CLI が要求する **最低 0.005 SOL** が要る。売れても在庫が無ければ供給できない。現在 NOS 1.089（3台ぶん）に補充したが **SOL 0.0042 が最低ラインを割っている**のが真のボトルネック。owner 側の SOL も薄く、fee floor gate が正しく補充を拒否した。**次の作業 = SOL の供給経路（Base→Solana bridge か、稼ぎからの自動補充）**。
+
+**残 = 外部 buyer の初決済**（自己決済でない1件）。
 
 ### 鍵と wallet の対応（2026-07-27 実測、SDK 導出で確定）
 
