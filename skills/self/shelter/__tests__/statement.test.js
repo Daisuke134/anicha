@@ -82,3 +82,15 @@ test('renderStatement: gives a stranger the addresses needed to check the claims
   assert.ok(html.includes('71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf'));
   assert.ok(html.includes('0xd072CDDda8371D97834859E9c840F9B0F1e51a1d'));
 });
+
+test('renderStatement: a sub-cent payment stays a number instead of rounding to nothing', () => {
+  const html = renderStatement(
+    buildStatement({ ...FACTS, spent: [{ what: 'one frontier model call', usd: 0.003, chain: 'base' }] }),
+  );
+  assert.ok(html.includes('$0.0030'), 'the $0.003 call must not print as $0.00');
+});
+
+test('renderStatement: a true zero still prints as an unmissable $0.00', () => {
+  const html = renderStatement(buildStatement(FACTS));
+  assert.ok(html.includes('$0.00 from outside'));
+});

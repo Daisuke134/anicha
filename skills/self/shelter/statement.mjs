@@ -82,7 +82,18 @@ export function buildStatement(facts = {}) {
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ESC[c]);
-const usd = (n) => `$${Number(n).toFixed(2)}`;
+
+/**
+ * Two decimals would round this entire economy to zero: rent is $0.008 and a thought is $0.003, so
+ * `toFixed(2)` printed "$0.00" next to real transactions and made the page look like nothing had
+ * happened. Sub-cent amounts therefore keep enough digits to stay a number instead of a rounding
+ * artifact — while a true zero still prints as $0.00, because that one has to be unmissable.
+ */
+const usd = (n) => {
+  const v = Number(n);
+  if (v === 0) return '$0.00';
+  return `$${v.toFixed(v < 0.01 ? 4 : 2)}`;
+};
 
 /** Render the statement as a self-contained page. No scripts, no forms, nothing to click. */
 export function renderStatement(s) {
