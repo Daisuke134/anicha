@@ -67,3 +67,30 @@ test('boot script is valid /bin/sh — the provider wraps it in sh -c (regressio
     execFileSync('/bin/sh', ['-n', f]); // throws on a syntax error
   }
 });
+
+test('boot script never uses a heredoc — the "; " join silently swallows the rest of the script', () => {
+  const s = buildFranklinBootScript({ model: 'm', maxSpendUsd: 0.01, prompt: 'p', exposePort: 8080, withBaseKey: true, withRenewer: true });
+  assert.equal(/<<'?[A-Z_]+'?/.test(s), false, 'a heredoc in a joined one-line script loses its terminator');
+});
+
+test('the buy-house tool is delivered whole and is valid JS', async () => {
+  const s = buildFranklinBootScript({ model: 'm', maxSpendUsd: 0.01, prompt: 'p', exposePort: 8080, withBaseKey: true });
+  const m = s.match(/printf %s "([A-Za-z0-9+/=]+)" \| base64 -d/);
+  assert.ok(m, 'tool must be embedded as base64');
+  const src = Buffer.from(m[1], 'base64').toString('utf8');
+  assert.match(src, /export async function buyHouse/);
+  assert.match(src, /DEFAULT_MAX_SPEND_USD/);
+});
+
+test('nothing written to the world-readable proof page can carry key material', () => {
+  const s = buildFranklinBootScript({ model: 'm', maxSpendUsd: 0.01, prompt: 'p', exposePort: 8080, withBaseKey: true, withRenewer: true });
+  // A library that echoes its input inside an exception would otherwise publish the key to the
+  // whole internet. Every append that carries dynamic text must pass a secret through a scrub.
+  const lines = s.split('\n').filter((l) => l.includes('appendFileSync("/tmp/proof.txt"'));
+  assert.ok(lines.length >= 1, 'expected writes to the proof file');
+  for (const line of lines) {
+    const dynamic = /e\.message|\+t\b|\+ *String\(t\)|r\.status/.test(line);
+    if (!dynamic) continue;
+    assert.match(line, /scrub\(|\[redacted\]/, `unscrubbed dynamic write: ${line.slice(0, 80)}`);
+  }
+});
