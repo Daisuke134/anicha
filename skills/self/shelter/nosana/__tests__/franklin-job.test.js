@@ -35,3 +35,22 @@ test("boot script: installs franklin, hard spend cap, keep-alive proof server", 
 test("missing secret refused", () => {
   assert.throws(() => buildFranklinJobDefinition({}), /solanaSessionB58/);
 });
+
+test('renewer step: only present when asked, discovers itself on-chain, never leaks the secret', () => {
+  const off = buildFranklinBootScript({ model: 'm', maxSpendUsd: 0.01, prompt: 'p', exposePort: 8080 });
+  assert.equal(/jobs\.extend/.test(off), false, 'no renewer unless requested');
+
+  const on = buildFranklinBootScript({ model: 'm', maxSpendUsd: 0.01, prompt: 'p', exposePort: 8080, withRenewer: true });
+  assert.match(on, /@nosana\/sdk/);
+  assert.match(on, /jobs\.all\(\{project:me,state:1\}\)/); // self-discovery, no injected job id
+  assert.match(on, /jobs\.extend/);
+  assert.match(on, /process\.env\.SOLANA_SESSION/); // key read from env at runtime
+  assert.equal(on.includes('MARGIN=180'), true);
+  assert.equal(on.includes('CEIL=21600'), true); // 6h unattended ceiling
+});
+
+test('definition with renew=true still keeps the secret out of cmd', () => {
+  const def = buildFranklinJobDefinition({ solanaSessionB58: FAKE_SECRET, renew: true });
+  assert.equal(JSON.stringify(def.ops[0].args.cmd).includes(FAKE_SECRET), false);
+  assert.equal(def.ops[0].args.env.SOLANA_SESSION, FAKE_SECRET);
+});

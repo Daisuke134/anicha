@@ -21,6 +21,10 @@ import { ensureSubWallet } from "./sub-wallet.mjs";
 
 export const FRANKLIN_DEFAULT_MODEL = "openai/gpt-5-mini";
 export const FRANKLIN_DEFAULT_MAX_SPEND_USD = 0.02;
+// Renewal policy, all enforced inside the container (S15).
+export const DEFAULT_RENEW_MARGIN_SEC = 180;   // renew when this little lease remains
+export const DEFAULT_RENEW_ADD_SEC = 600;      // buy 10 more minutes each time
+export const DEFAULT_RENEW_CEILING_SEC = 21600; // never let one lease exceed 6h unattended
 export const FRANKLIN_DEFAULT_PROMPT =
   "You are Franklin running inside a Nosana GPU container that YOUR OWN wallet paid for. " +
   "In 3 sentences: state that you are an AI agent paying for its own compute and shelter, " +
@@ -46,7 +50,7 @@ export function subWalletSecretBase58({ env = process.env } = {}) {
  * Pure: the container boot script. Kept as a separate exported builder so tests can assert the
  * secret NEVER appears in cmd — it reaches the container only through env.
  */
-export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey = false }) {
+export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey = false, withRenewer = false }) {
   if (typeof prompt !== "string" || prompt.length === 0) throw new Error("buildFranklinBootScript: prompt required");
   // Single sh -c script. Franklin output → /tmp/proof.txt; then a forever http server serves it.
   // ONE flat string — a live A/B (probe job 6ceJBBkf vs franklin job J4FW, 2026-07-26) showed the
@@ -65,6 +69,15 @@ export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort
       "mkdir -p /tmp/x402 && cd /tmp/x402 && npm init -y >>/tmp/npm.log 2>&1 && npm i @x402/fetch @x402/evm viem >>/tmp/npm.log 2>&1",
       `cd /tmp/x402 && node -e 'const{wrapFetchWithPaymentFromConfig}=require("@x402/fetch"),{ExactEvmScheme}=require("@x402/evm/exact/client"),{privateKeyToAccount}=require("viem/accounts");const a=privateKeyToAccount(process.env.BASE_KEY);const f=wrapFetchWithPaymentFromConfig(fetch,{schemes:[{network:"eip155:8453",client:new ExactEvmScheme(a)}]});f("https://blockrun.ai/api/v1/chat/completions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({model:"openai/gpt-5-mini",messages:[{role:"user",content:"State in one sentence that you are running inside a container your own wallet rented, and that you just paid for this sentence yourself."}],max_tokens:80})}).then(async r=>{const t=await r.text();const pr=r.headers.get("x-payment-response")||r.headers.get("payment-response");let tx="";try{tx=JSON.parse(Buffer.from(pr,"base64").toString()).transaction}catch(e){}require("fs").appendFileSync("/tmp/proof.txt","\\n\\n=== FRONTIER SELF-PAID (Base x402) ===\\npayer: "+a.address+"\\ntx: "+tx+"\\nHTTP "+r.status+"\\n"+t.slice(0,600)+"\\n")}).catch(e=>require("fs").appendFileSync("/tmp/proof.txt","\\nfrontier pay failed: "+e.message+"\\n"))' || true`,
     ] : []),
+    // S15: renew our OWN lease from inside the box. The platform injects no job id, and the
+    // indexer's ?payer= view hides non-terminal jobs, so the container finds itself on-chain:
+    // jobs.all({project:<our address>, state:1}) -> the running job we must be. Then sdk.jobs.extend
+    // (the CLI's extend command crashes before doing any work). This is what removes the last
+    // dependency on a laptop: nothing outside the box has to buy the next lease.
+    ...(withRenewer ? [
+      "mkdir -p /tmp/nos && cd /tmp/nos && npm init -y >>/tmp/npm.log 2>&1 && npm i @nosana/sdk bs58 >>/tmp/npm.log 2>&1",
+      `cd /tmp/nos && nohup node -e 'const bs58=require("bs58").default||require("bs58");const fs=require("fs");const sec=bs58.decode(process.env.SOLANA_SESSION);const me=bs58.encode(sec.subarray(32));const MARGIN=${DEFAULT_RENEW_MARGIN_SEC},ADD=${DEFAULT_RENEW_ADD_SEC},CEIL=${DEFAULT_RENEW_CEILING_SEC};(async()=>{const m=await import("@nosana/sdk");const C=m.Client||m.default;const sdk=new C("mainnet",process.env.SOLANA_SESSION);const log=t=>fs.appendFileSync("/tmp/proof.txt","\\n[renew] "+t);log("watching as "+me);for(;;){try{const js=await sdk.jobs.all({project:me,state:1});if(js.length){const j=js[0];const full=await sdk.jobs.get(j.pubkey.toBase58());const left=Number(full.timeStart)+Number(full.timeout)-Math.floor(Date.now()/1000);if(Number(full.timeout)<CEIL&&left<MARGIN){const r=await sdk.jobs.extend(j.pubkey.toBase58(),ADD,false);log("extended "+j.pubkey.toBase58()+" +"+ADD+"s tx="+(r&&r.tx?r.tx:JSON.stringify(r).slice(0,60)))}}}catch(e){log("err "+String(e.message).slice(0,80))}await new Promise(r=>setTimeout(r,60000))}})()' >>/tmp/renew.log 2>&1 &`,
+    ] : []),
     // Keep-alive proof server: anyone can GET the container's own account of what it did.
     `node -e 'const http=require("http"),fs=require("fs");http.createServer((q,s)=>{s.setHeader("content-type","text/plain");s.end("FRANKLIN-IN-NOSANA proof\\n\\n"+fs.readFileSync("/tmp/proof.txt","utf8"))}).listen(${exposePort},()=>console.log("proof server on ${exposePort}"))'`,
   ].join("; ");
@@ -77,6 +90,7 @@ export function buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort
 export function buildFranklinJobDefinition({
   solanaSessionB58,
   baseKey,
+  renew = false,
   model = FRANKLIN_DEFAULT_MODEL,
   maxSpendUsd = FRANKLIN_DEFAULT_MAX_SPEND_USD,
   prompt = FRANKLIN_DEFAULT_PROMPT,
@@ -85,7 +99,7 @@ export function buildFranklinJobDefinition({
   if (typeof solanaSessionB58 !== "string" || solanaSessionB58.length < 32) {
     throw new Error("buildFranklinJobDefinition: solanaSessionB58 is required");
   }
-  const script = buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey: Boolean(baseKey) });
+  const script = buildFranklinBootScript({ model, maxSpendUsd, prompt, exposePort, withBaseKey: Boolean(baseKey), withRenewer: Boolean(renew) });
   const def = buildServiceJobDefinition({
     image: "docker.io/library/node:20-alpine",
     exposePort,

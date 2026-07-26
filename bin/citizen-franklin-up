@@ -49,7 +49,10 @@ try {
     const bkPath = env.BASE_SUBWALLET_KEYFILE || `${env.ANICCA_HOME}/.automaton/base_subwallet_key.json`;
     baseKey = JSON.parse(fsSync.readFileSync(bkPath, "utf8")).private_key;
   } catch { baseKey = undefined; }
-  const def = buildFranklinJobDefinition({ solanaSessionB58: subWalletSecretBase58({ env }), baseKey });
+  // S15: --renew makes the container extend its OWN lease from inside (no laptop needed).
+  const renew = args.includes("--renew") || env.NOSANA_RENEW === "1";
+  const def = buildFranklinJobDefinition({ solanaSessionB58: subWalletSecretBase58({ env }), baseKey, renew });
+  if (renew) log("renewer ON — the container will extend its own lease on-chain");
   log(baseKey ? "BASE_KEY present — container will self-pay frontier via x402" : "no BASE_KEY — Solana-only job");
   const v = validateJobDefinition(def);
   if (!v.valid) throw new Error(`invalid definition: ${v.errors.join("; ")}`);
