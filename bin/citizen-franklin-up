@@ -116,6 +116,7 @@ try {
             if (j && j.payer === sub.address && (!j.timeStart || j.timeStart >= nowTs - 10)) { job = j; break; }
           }
         }
+      }
       } catch { /* transient RPC/API failure — next iteration retries */ }
     }
   }
