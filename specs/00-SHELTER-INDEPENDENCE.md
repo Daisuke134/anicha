@@ -29,7 +29,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | 5 | S14 | 独立の最終テスト — Mac 側プロセスだけ停止し Nosana 側の単独生存を実測 | ✅ **完了 2026-07-26**（S12 と同時実証）。手順: Franklin job `3DUJeSYD…` 稼働中に Mac 側の poster(pid 89603) と steward を kill（20:02:41Z、`poster-dead` 確認）→ その後も cloud service URL は **HTTP 200 で Franklin proof を返し続け**、lease は `2 success` で完走（monitor 実測）。= Mac が消えても Nosana 上の Franklin は生存。他の Mac 稼働系は無傷 |
 
 | 6 | S16 | **注文する道具を agent に渡す**（家を「継承する」のをやめる） | ✅ **完了 2026-07-27**。それまでは人間が1軒目を post し agent は結果を受け取るだけ = 小遣いであって収入ではなかった。`skills/self/shelter/buy-house.mjs` を container に base64 一行で配送し、agent が自分の鍵で発注する。**live 実証: job `7cu6bmHzRnnEdetrzh3QYeWFuGjgKm8J9x5rufhxDdCs` の中から `{"ok":true,"rail":"modal","id":"sb-85okeYAh2O6PxtjD8s9Rrb","spentUsd":0.01}`** — 外部の誰も発注していない。cap は network 到達前に `planPurchase` が判定（$0.50/call）。2026-07-27 追加: 同じ verb に Nosana rail を実装（`buyHouseOnNosana` / `rentAnywhere`）— 呼ぶ側は「どちらの大家がどんな作法か」を知らなくてよい。これが blockrun-mcp への PR の中身になる |
-| 7 | S17 | **決算書を agent 自身に公開させる**（生きている・自費で払った・稼ぎはゼロ、を第三者が検算できる形で） | ✅ **実装完了 2026-07-27**（`skills/self/shelter/statement.mjs`、9/9 + 全体 129/129 tests）。設計の核: **blacklist（秘密を消す）ではなく allowlist（宣言した field しか描画しない）**。理由 = Solana の署名と Solana の秘密鍵はどちらも base58 87-88字で、**形で見分けることが原理的に不可能**だから scrubber は当てにならない。自己決済は revenue に数えない（`from:"self"` を除外）ので、verdict は外部入金があるまで `funded` から動かない。`/` = 決算書、`/log` = 生ログ、`/heartbeats` = 検算用の生データ。container 側は各支出時に `/tmp/ledger.jsonl` へ1行書き、renewer が45秒ごとに最新 blockhash を自分の鍵で署名して heartbeat 行を足す |
+| 7 | S17 | **決算書を agent 自身に公開させる**（生きている・自費で払った・稼ぎはゼロ、を第三者が検算できる形で） | ✅ **実装完了 2026-07-27**（`skills/self/shelter/statement.mjs`、9/9 + 全体 129/129 tests）。設計の核: **blacklist（秘密を消す）ではなく allowlist（宣言した field しか描画しない）**。理由 = Solana の署名と Solana の秘密鍵はどちらも base58 87-88字で、**形で見分けることが原理的に不可能**だから scrubber は当てにならない。自己決済は revenue に数えない（`from:"self"` を除外）ので、verdict は外部入金があるまで `funded` から動かない。`/` = 決算書、`/log` = 生ログ、`/heartbeats` = 検算用の生データ。container 側は各支出時に `/tmp/ledger.jsonl` へ1行書き、renewer が45秒ごとに最新 blockhash を自分の鍵で署名して heartbeat 行を足す | ✅ **live 実証完了 2026-07-27** — job `AzUFmVa5qeibfgXUpKW1szw7XXeK9x2S6JANkTnvhC3p`、公開 URL `https://2SRDLpUEKRXgpaAXMWs1KcVhmKGVofjgH4EBXcsqGsq4.node.k8s.prd.nos.ci`（証拠 `specs/evidence/s17-statement-AzUFmVa5.html` / `s17-heartbeats-AzUFmVa5.json`）。ページが実際に出したもの: 支出3件（飯 tx `0x186c1e56…` / 2軒目 `sb-axOzfUwsc0NwBE0Vo7kEqr` / **自己 lease 延長 tx `iJTfrgbF…`**）、収入 `$0.00 from outside`、heartbeat 12件。**第三者検証を自分で回した結果: 署名 12/12 有効・blockhash 12/12 が実 slot と chain 一致**。lease は 600→1200 秒に自己延長された（`jobs.get` = `state: RUNNING, timeout: 1200` 実測）。**発見して潰した表示バグ**: `toFixed(2)` が家賃 $0.008・思考 $0.003 を全部 `$0.00` に丸め、実 tx の隣に「何も起きていない」と表示していた。サブセントは4桁で出す（真のゼロだけは `$0.00` のまま — そこは見逃されては困る）。
 
 ### B. 稼ぎ（agent economy — diversified・全 rail real・dry ゼロ）
 
@@ -201,6 +201,20 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | 2 | 冗長化（住処・餌の2社目） | 単一障害点2つを外す |
 | 3 | Life Manager merge 設計 | 製品化 |
 | 4 | 記事 publish | 1 が verified になってから。稼ぎの数字が入った記事の方が圧倒的に強い |
+
+### G0. 上流 PR — 我々の rail を買い手のいる場所へ（2026-07-27）
+
+**[BlockRunAI/blockrun-mcp#82](https://github.com/BlockRunAI/blockrun-mcp/pull/82) 提出済み**: `blockrun_nosana`（rent/status/extend）。上流は **Solana を既に一級市民として持っていた**（`getChain()` / `SolanaLLMClient` / `solana-402.ts`）が **Nosana への言及はゼロ** — 新 chain ではなく新しい取引先を足すだけで済んだ。
+
+| 判断 | 理由 |
+|---|---|
+| `optionalDependencies` ではなく **optional peer** | npm は optional deps を既定で入れる。ほとんどの人が呼ばないツールのために全員に113パッケージ払わせない。`package-lock.json` は無改変 |
+| 事前に断る3つ（範囲外の秒数 / 予算超過 / array `cmd`） | 全部こちらが実際に踏んだ失敗。特に array `cmd` は SDK が受理してノードが数秒後に**無言で死ぬ** |
+| 説明文に「NOS と SOL を持つ必要」「定義は公開 IPFS に載る」を先に書く | 後から気づかせない |
+
+**検証**: 262/262 tests・typecheck・build・brand-numbers check・CONTRIBUTING の stdio smoke（20 tools に `blockrun_nosana` 在り）。加えて **mock ではなく live mainnet market に打った** — `jobs.get` が `state: RUNNING, timeout: 1200` を返し、`getExposeIdHash` が実際に稼働中の URL と一致。
+
+**リスク（一次調査）**: この repo で外部 fork の PR が**そのまま merge された実績は直近ゼロ**。維持者のリリース速度が極端に速く、内容だけ吸収されて PR は閉じられる形になりやすい（#59/#66 が実例、停滞と conflict が明示的な理由）。だから小さく・単一目的・最新 main に rebase 済みで出した。
 
 ## G. 稼ぎ loop を real にする（最優先）
 
