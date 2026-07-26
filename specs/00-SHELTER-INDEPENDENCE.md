@@ -32,7 +32,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 | 順 | ID | 内容 | 状態 |
 |---|---|---|---|
-| 6 | T2b | discovery catalog 登録 — 到達可能だが発見不可能 | 🔴 revenue $0 の残りの壁 |
+| 6 | T2b | discovery catalog 登録 | 🔄 **実測で前提修正 2026-07-26**: 「到達可能だが発見不可能」は不正確 — 実測すると x402 skill route は production で **404**（`anicca-proxy-production.up.railway.app` は health 200 だが `/api/x402/<skill>` 未マウント）。discovery 対応 server コードは2実装存在（`anicca-rtdash/apps/x402-agents/src/server.js` = CDP facilitator + `declareDiscoveryExtension`、railway.toml あるが未 link；`life-manager-8i-cutover` の serve.mjs = founder wallet `0x810F6D61F7606dEEE2657d3083E150a222Bc29C5`、x402.org facilitator で 402 検証済みだが CDP Bazaar には非投入）。**真の壁 = ①永続 URL にデプロイ ②pre-settlement 登録（Bazaar/x402scan は settlement-driven で初回 settle 後しか index されない → x402scan/AgentCash の pre-settlement submit が必要）③Bazaar merchant lookup で自分の listing 確認**。登録 API の実 URL/フィールドを research 中（done 条件 = 外部 agent が payTo で発見可能） | 🔴 revenue $0 の壁 |
 | 7 | E7 | Gig を banked まで（実 payout rail） | 未着手 |
 | 8 | F1 / T2 | トレードループ + 理由報告 / 稼ぎ面仕上げ | 🔄 |
 | 9 | T2c | serve-mainnet.mjs 自己決済 — ETH $0.0165 で gas 不足、売れても決済不能 | 要 gas |
