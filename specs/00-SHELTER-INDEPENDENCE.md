@@ -95,6 +95,23 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 ## D. Life Manager × Franklin — 製品の姿と最終形（Dais 2026-07-26 裁定）
 
+### ★ 実測（2026-07-27）: Life Manager は「merge 先」ではなく「新規に建てる場所」★
+
+repo `/Users/anicca/Projects/life-manager` を実際に読んだ結果、この節の前提が**事実と食い違っていた**。
+
+| 前提していたこと | 実測 |
+|---|---|
+| Franklin 群の管理画面に育てられる製品がある | **無い**。中身はカレンダー連携の電話リマインダー（Telnyx + Gemini Live で予定15分前に架電）。README 実物の一行がそれを言っている |
+| 金を扱う部分がある | **無い**。wallet / payment / stripe / x402 / solana / USDC / spend-cap を全文検索して**ヒット0**。唯一の `crypto` 使用は承認トークンの sha1 |
+| agent 系の足場がある | **無い**。`franklin|nosana|shelter` の検索も**ヒット0**。`agent/resolve.py` はあるが「予定の場所を推測する LLM」であって別物 |
+| server / API 層がある | **無い**。`openclaw cron` から叩く CLI 群のみ。root に `package.json` すら無い |
+| merge 設計の doc がある | **無い** |
+
+**したがって D群は「merge」ではなく「ゼロから作る」。** 唯一の接続点らしい接続点は `adapters/transport.{js,py}`（local/cloud を抽象化している唯一の場所）で、新しい transport を足す型として使える。それ以外は全部新規。
+
+**この訂正が順序に効く**: D群を「既存製品への統合」だと思っていたから軽く見積もっていた。実際は独立した新規プロダクトなので、**S20b/S21（生存の完成）より後ろで正しい**。生きている Franklin が1体もいない状態で管理画面を作るのは、管理対象のない管理者を作ること。
+
+
 ### Q. Life Manager は Franklin 自身か、Franklin 群の管理者か
 
 **答え: 両方。ただし段階が違う。** Life Manager は「Franklin を雇う側」として始まり、最終的に「自分も Franklin である管理者」になる。
