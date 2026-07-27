@@ -171,10 +171,10 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | | 1軒目 Nosana | 2軒目 Modal gateway |
 |---|---|---|
 | image | 任意のコンテナ | **python:3.11 のみ** |
-| 公開 URL | あり（`getExposeIdHash` で導出） | なし（gateway 経由の exec のみ） |
+| 公開 URL | あり（`getExposeIdHash` で導出） | gateway-native は無し。workload 自身が Cloudflare Quick Tunnel を起動すれば **一時URL** は出せる |
 | Franklin(npm) が動くか | ✅ | ❌ **node が無い** |
 
-**冗長化の主張は、これまで書いていたより弱い。** 「大家が2社ある」は本当だが「同じものが両方で動く」は偽。2軒目で生き延びるには Python 版の最小生存機能（heartbeat 署名 + 決算書 + x402 決済）が要る。x402 の python SDK v2 には EVM の exact scheme が同梱されておらず（`x402.clients` は存在せず、`x402[evm]` を入れても `x402_evm` は生えない）、手で EIP-3009 を組む必要がある。**S20b として残す。**
+**冗長化の正確な主張:** Node 版 Franklin の同一バイナリは2軒目で動かない。一方、Python 版の最小生存機能（x402 決済、署名 heartbeat、allowlist 決算書）は2軒目で実証済みなので、**同じagent実装の冗長化ではなく、同じ生存契約の異種runtime冗長化**が成立する。x402 の Python SDK v2 には EVM の exact scheme が同梱されていないため、EIP-3009 を手で組む。
 
 ### 金を動かす loop で踏んだ2つ（live でしか出なかった・2026-07-27）
 
@@ -209,14 +209,14 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 ### 待たない（今やる。全部こちらだけで閉じる）
 
-**現在地**: 支出側は完全に閉じた（家を買う・飯を買う・自分で延長する・尽きる前に止まる・尽きたら補給する）。残っているのは**冗長化が本物かどうか**と、**Mac を外すこと**。
+**現在地**: 支出側と異種runtime冗長化は閉じた（家を買う・飯を買う・自分で延長する・尽きる前に止まる・尽きたら補給する・Pythonの2軒目で生存証拠と決算書を出す）。shelter-local の次は **S21: Mac を外す**。
 
 | 順 | ID | やること | 状態 / なぜこの順か |
 |---|---|---|---|
 | ~~1~~ | S18 | renewer に金の床 | ✅ 完了。実残高 0.0267 NOS で `renew=false` を実測 |
 | ~~2~~ | S19 | 収入 → bridge → swap → sub-wallet top-up | ✅ 完了。live で 0.0267→0.5 NOS、tx `aYGEcC5k…` finalized |
-| **1** | **S20b** | **2軒目で生き延びる（Python 版の最小生存機能）** | 🔄 **進行中、次は S20b-c 決算書 serve**。S20 の入居と x402、Python heartbeat は済んだが、2軒目は `python:3.11` のみで **node が無く Franklin が動かない**。残りは②決算書の serve。これが無い限り「大家が2社」は書けても「2社で生きられる」は書けない |
-| 2 | S21 | bootstrap を Modal へ（Mac の関与を資金だけにする） | S20b の後。**S13 の制約が効く**: confidential post は poster プロセスが claim+delivery まで生存必須 → 「Mac を外す」の具体形は「poster を2軒目で走らせる」。だが2軒目は python のみなので、poster を python から叩けるか（= Nosana の job post を python で組めるか）が S20b と同じ壁 |
+| ~~1~~ | **S20b** | **2軒目で生き延びる（Python 版の最小生存機能）** | ✅ 完了。x402、Python heartbeat、公開allowlist決算書を同じ `python:3.11` rail で実証。Node版Franklinではなく生存契約の異種runtime実装 |
+| **1** | **S21** | bootstrap を Modal へ（Mac の関与を資金だけにする） | **shelter-local current cursor**。**S13 の制約が効く**: confidential post は poster プロセスが claim+delivery まで生存必須 → 「Mac を外す」の具体形は「poster を2軒目で走らせる」。2軒目は python のみなので、Nosana job post を Python で組む |
 | 3 | D群 | Life Manager 設計（custody / dashboard / cap UI / 法務） | 上が揃って初めて「管理する対象」が実在する |
 | 4 | F群 | 記事 EN 更新 → JP | 数字待ちだが、**仕組みと検証手順は今書ける**。冗長化の記述は S20b の結果で書き換えが要る（現状の主張は実測より強い） |
 
@@ -228,7 +228,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 |---|---|---|
 | **x402 決済** | ✅ **完了・実測済み** | `skills/self/shelter/python/x402_pay.py`。`eth_account` + `requests` のみ。**実 tx `0x315fe61b…`、Base block 49161947、receipt status 0x1**。13 tests。黙って失敗する定数3つ: header は v2 で `PAYMENT-SIGNATURE`（v1 の `X-PAYMENT` を送ると **402 が返るだけで原因が見えない**）／amount は base unit なので**変換したら署名は有効なまま違う額を払う**／署名の `0x` は `HexBytes.hex()` が付けない |
 | heartbeat 署名 | ✅ **完了・実測済み** | `skills/self/shelter/python/heartbeat.py` + `modal-heartbeat.mjs`。Modal sandbox `sb-0l4DnecMvMpXm4OzLLcFTn` 内だけで一時 Ed25519 鍵を生成し、同一公開鍵で約5.3秒間隔の2周期を署名（slot `435525136`→`435525148`）。既存 JS verifier + `citizen-steward --verify --rpc` が **2/2 PASS、blockhash も実 slot と一致**。証拠: `specs/evidence/s20b-python-heartbeat-sb-0l4DnecMvMpXm4OzLLcFTn.jsonl`。成功サイクルの実費は create $0.012 + exec $0.003 = **$0.015**。API の1引数2000文字制限を live で発見し、公開ソースを複数引数へ分割する回帰テストを追加。長期 wallet secret は sandbox に渡していない |
-| 決算書 serve | ⏳ 残 | `http.server` で足りる。`statement.mjs` の allowlist 設計をそのまま移植（**blacklist にしない** — Solana の署名と秘密鍵は base58 87-88字で形が同じ） |
+| 決算書 serve | ✅ **完了・実測済み** | `statement.py` + `modal-statement.mjs`。Modal `sb-34xzazUQKuoGKBFWeh1PQ6` が一時URLの `/`・`/statement.json`・`/heartbeats` を全て **HTTP 200** でserve。再帰allowlist、外部収入 `$0.00`、runtime `$0.015`、`funded` を明記。Base USDC `1.766`、SOL `0.026094157`、NOS `0.5`、PM 2 positions / marked value `$7.9951` / cashPnl `$1.1166` / redeemable `0` は独立再読込と差分ゼロ。heartbeat は既存JS verifier + RPCで **2/2 PASS**。証拠: `specs/evidence/s20b-python-statement-sb-34xzazUQKuoGKBFWeh1PQ6*`。Quick Tunnel は開発用・一時的・SLA無し、lease は5分。liveで DNS公開遅延とx402 exec後決済を踏み、両方を有限リトライの回帰テストへ固定。S20b全デバッグ+証明費は `$0.075` |
 
 #### S21: Mac を外す — **判定 FEASIBLE-WITH-EFFORT**
 
@@ -258,7 +258,7 @@ Python から Nosana に job を post する経路を一次ソースで確認し
 そして実測と矛盾する1行:
 > "That asymmetry is why an agent that can use both rails is stronger than one that has mastered either."
 
-**Node の agent は2軒目で動かない**（`Only managed image python:3.11 is currently available.`）。「大家が2社ある」は真、「同じものが両方で動く」は偽。**S20b 完了後に書けば真になる** — だから記事は S20b の後。JP 版は 07-27 分が未着手。
+**Node の agent は2軒目で動かない**（`Only managed image python:3.11 is currently available.`）。ただし Python 版の x402 + heartbeat + 決算書は2軒目で実証済み。「同じものが両方で動く」ではなく、**同じ生存契約を異種runtimeで満たす**と書けば真になる。Quick Tunnel は恒久公開基盤ではないことも併記する。
 
 ### 稼ぎ loop の実稼働状況（2026-07-27 実測・ログ全読み）
 

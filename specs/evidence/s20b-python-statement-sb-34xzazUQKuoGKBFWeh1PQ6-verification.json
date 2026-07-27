@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "sandboxId": "sb-34xzazUQKuoGKBFWeh1PQ6",
+  "temporaryUrl": "https://macro-air-busy-platinum.trycloudflare.com",
+  "routes": {
+    "/": 200,
+    "/statement.json": 200,
+    "/heartbeats": 200
+  },
+  "schema": {
+    "ok": true,
+    "reason": "public schema verifies"
+  },
+  "heartbeatVerification": {
+    "ok": true,
+    "verified": 2,
+    "claimed": 2,
+    "reason": "2 canonical heartbeat rows verify"
+  },
+  "independent": {
+    "balances": {
+      "baseUsdc": 1.766,
+      "solanaSol": 0.026094157,
+      "solanaNos": 0.5
+    },
+    "polymarket": {
+      "positionCount": 2,
+      "currentValueUsd": 7.9951,
+      "cashPnlUsd": 1.1166,
+      "redeemableCount": 0
+    }
+  },
+  "comparison": {
+    "ok": true,
+    "differences": []
+  },
+  "proofRunCostUsd": 0.015,
+  "s20bDebugAndProofSpendUsd": 0.075,
+  "externalRevenueUsd": 0,
+  "limitations": [
+    "The Quick Tunnel URL is ephemeral, development-only, and has no SLA.",
+    "The managed sandbox lease is five minutes.",
+    "Polymarket cashPnl is a marked API field, not closed net profit.",
+    "redeemableCount was zero, so no redeem branch executed."
+  ]
+}
