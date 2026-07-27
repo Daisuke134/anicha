@@ -215,6 +215,19 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 **実装は executor subagent に出す。orchestrator は spec 管理と E2E 検証に専念する。** 理由は context — 実装の生ツール出力を orchestrator の窓に流し込むと、順序の正本（この spec）を保つ余力が先に尽きる。手順は flow A hybrid: spec/plan を書く → `.worktrees/<id>/` を切る → executor が TDD で実装 → orchestrator が実チェーン/実コマンドで検証 → merge → worktree 削除。**executor には `--live` を絶対に渡させない**（実際に金が動く操作は orchestrator が自分で撃って自分で検証する）。
 
+### 財布の階層（S19 で踏んだ穴・2026-07-27）
+
+**instance には財布が2段ある。混同すると「補給したのに家が借りられない」が起きる。**
+
+| 段 | 誰 | 実測（2026-07-27 深夜） | 役割 |
+|---|---|---|---|
+| treasury | owner `F5SYUC4f5QULbEgSYb1DFCBfi74AnWE3ZaXAhqXwhZ5T` | **0.607 NOS** | 資金の受け皿。`resolveSolanaSecret` が返すのはこっち |
+| shelter | sub-wallet `71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf`（`$ANICCA_HOME/.automaton/nosana_subwallet_key.json`） | **0.0267 NOS** | **家賃を実際に払う**。cap = 残高。cloud へ出る鍵はこれだけ |
+
+S19 の初回実装は treasury だけを見て「補給が要る」と判断していた。だが treasury は既に潤沢で、飢えているのは shelter の方。**橋は正しく渡るが、家賃を払う財布の1つ手前で止まる。** 補給は3脚（bridge → swap → **top-up**）で、最後の `fundSubWallet` が無いと何も解決しない。各脚は前の脚が成功した時だけ走る（届いていない金は動かせない）。
+
+**一般法則: 「残高が足りない」を直す前に、足りないのが*どの段*かを確定する。** 上の段を満たしても下の段は飢えたまま。→ [[colony-wallets-where-the-money-actually-is]] と同型（あちらは instance 違い、こちらは同一 instance 内の段違い）。
+
 ### 待つ（着手順に入れない。条件が満たされた瞬間だけ動く）
 
 | ID | 待っているもの | 満たされたら何が起きる |
