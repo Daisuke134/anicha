@@ -10,7 +10,8 @@ import { verifyHeartbeatEntry } from "../nosana/heartbeat.mjs";
 
 
 const HEARTBEAT_PATH = fileURLToPath(new URL("./heartbeat.py", import.meta.url));
-const REQUIREMENTS_PATH = fileURLToPath(new URL("./requirements-heartbeat.txt", import.meta.url));
+const MAX_COMMAND_PART = 2000;
+const SOURCE_CHUNK_SIZE = 1800;
 
 function positiveInteger(value, name) {
   if (!Number.isInteger(value) || value < 1) throw new Error(`${name} must be a positive integer`);
@@ -24,26 +25,22 @@ function nonNegativeNumber(value, name) {
   return value;
 }
 
-function writePublicFileCommand(path, contents) {
-  const encoded = Buffer.from(contents, "utf8").toString("base64");
-  return `python -c 'import base64;open("${path}","wb").write(base64.b64decode("${encoded}"))'`;
-}
-
 /** Build the one public, secret-free command executed by the paid Modal exec endpoint. */
 export function buildHeartbeatCommand({ cycles = 2, intervalSeconds = 5 } = {}) {
   positiveInteger(cycles, "cycles");
   nonNegativeNumber(intervalSeconds, "intervalSeconds");
   const source = fs.readFileSync(HEARTBEAT_PATH, "utf8");
-  const requirements = fs.readFileSync(REQUIREMENTS_PATH, "utf8");
-  const root = "/tmp/s20b-heartbeat";
+  const encoded = Buffer.from(source, "utf8").toString("base64");
+  const chunks = encoded.match(new RegExp(`.{1,${SOURCE_CHUNK_SIZE}}`, "g")) || [];
   const script = [
-    `mkdir -p ${root}`,
-    writePublicFileCommand(`${root}/heartbeat.py`, source),
-    writePublicFileCommand(`${root}/requirements-heartbeat.txt`, requirements),
-    `python -m pip install --disable-pip-version-check --quiet -r ${root}/requirements-heartbeat.txt`,
-    `exec python ${root}/heartbeat.py --cycles ${cycles} --interval ${intervalSeconds}`,
+    "python -m pip install --disable-pip-version-check --quiet PyNaCl==1.6.2 base58==2.1.1",
+    `exec python -c 'import base64,sys;chunks=sys.argv[1:];sys.argv=["heartbeat.py","--cycles","${cycles}","--interval","${intervalSeconds}"];exec(compile(base64.b64decode("".join(chunks)),"heartbeat.py","exec"))' "$@"`,
   ].join(" && ");
-  return ["sh", "-c", script];
+  const command = ["sh", "-c", script, "heartbeat-source", ...chunks];
+  if (command.some((part) => part.length > MAX_COMMAND_PART)) {
+    throw new Error(`Modal command parts must be at most ${MAX_COMMAND_PART} characters`);
+  }
+  return command;
 }
 
 /**
@@ -106,7 +103,16 @@ export async function proveModalHeartbeat({
     maxExecs: 1,
   });
   if (!habitation.ok) {
-    return { ok: false, reason: habitation.reason, habitation, entries: [] };
+    const sandboxId = habitation.sandbox?.sandbox_id || habitation.id;
+    const failedExec = habitation.execs?.[0];
+    const diagnostic = failedExec
+      ? {
+          httpStatus: failedExec.status,
+          stderr: String(failedExec.stderr || "").slice(0, 500),
+          detail: failedExec.detail,
+        }
+      : undefined;
+    return { ok: false, reason: habitation.reason, sandboxId, diagnostic, habitation, entries: [] };
   }
   const sandboxId = habitation.sandbox?.sandbox_id || habitation.id;
   const stdout = habitation.execs?.[0]?.stdout;
@@ -126,6 +132,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         ok: result.ok,
         sandboxId: result.sandboxId,
         reason: result.reason,
+        diagnostic: result.diagnostic,
         entries: result.entries,
       };
       process.stdout.write(`${JSON.stringify(safe)}\n`);

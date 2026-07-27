@@ -95,8 +95,9 @@ test("the packaged command contains public code and no caller wallet secret", ()
   const command = buildHeartbeatCommand({ cycles: 2, intervalSeconds: 5 });
 
   assert.deepEqual(command.slice(0, 2), ["sh", "-c"]);
-  assert.match(command[2], /requirements-heartbeat/);
-  assert.match(command[2], /--cycles 2 --interval 5/);
+  assert.match(command[2], /PyNaCl==1\.6\.2/);
+  assert.match(command[2], /"--cycles","2","--interval","5"/);
+  assert.equal(command.every((part) => part.length <= 2000), true);
   assert.equal(command.join(" ").includes(key), false);
   assert.equal(command.join(" ").includes("SOLANA_SESSION"), false);
   assert.equal(command.join(" ").includes("BASE_KEY"), false);
@@ -133,4 +134,33 @@ test("the adapter verifies stdout returned by the existing paid move-in path", a
   assert.equal(result.ok, true);
   assert.equal(result.sandboxId, "sb-natural");
   assert.equal(result.entries.length, 2);
+});
+
+test("a failed live exec preserves bounded diagnostics without echoing the command", async () => {
+  const responses = [
+    {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ sandbox_id: "sb-failed", status: "running" }),
+    },
+    {
+      ok: false,
+      status: 422,
+      text: async () => JSON.stringify({ detail: "command is too long" }),
+    },
+  ];
+
+  const result = await proveModalHeartbeat({
+    baseKey: `0x${"11".repeat(32)}`,
+    fetchImpl: async () => responses.shift(),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.sandboxId, "sb-failed");
+  assert.deepEqual(result.diagnostic, {
+    httpStatus: 422,
+    stderr: "",
+    detail: { detail: "command is too long" },
+  });
+  assert.equal(JSON.stringify(result.diagnostic).includes("heartbeat.py"), false);
 });

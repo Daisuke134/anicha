@@ -215,7 +215,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 |---|---|---|---|
 | ~~1~~ | S18 | renewer に金の床 | ✅ 完了。実残高 0.0267 NOS で `renew=false` を実測 |
 | ~~2~~ | S19 | 収入 → bridge → swap → sub-wallet top-up | ✅ 完了。live で 0.0267→0.5 NOS、tx `aYGEcC5k…` finalized |
-| **1** | **S20b** | **2軒目で生き延びる（Python 版の最小生存機能）** | 🔄 **次に着手**。S20 の入居は済んだが、2軒目は `python:3.11` のみで **node が無く Franklin が動かない**。要るもの: ①ed25519 で blockhash 署名（heartbeat）②決算書の serve ③**x402 決済を手組み**（python SDK v2 に EVM exact scheme が無い — `x402.clients` は存在せず `x402[evm]` を入れても `x402_evm` は生えない。402 の中身は実測済み: `scheme:exact / eip155:8453 / USDC / EIP-3009`）。**これが無い限り「大家が2社」は書けても「2社で生きられる」は書けない** |
+| **1** | **S20b** | **2軒目で生き延びる（Python 版の最小生存機能）** | 🔄 **進行中、次は S20b-c 決算書 serve**。S20 の入居と x402、Python heartbeat は済んだが、2軒目は `python:3.11` のみで **node が無く Franklin が動かない**。残りは②決算書の serve。これが無い限り「大家が2社」は書けても「2社で生きられる」は書けない |
 | 2 | S21 | bootstrap を Modal へ（Mac の関与を資金だけにする） | S20b の後。**S13 の制約が効く**: confidential post は poster プロセスが claim+delivery まで生存必須 → 「Mac を外す」の具体形は「poster を2軒目で走らせる」。だが2軒目は python のみなので、poster を python から叩けるか（= Nosana の job post を python で組めるか）が S20b と同じ壁 |
 | 3 | D群 | Life Manager 設計（custody / dashboard / cap UI / 法務） | 上が揃って初めて「管理する対象」が実在する |
 | 4 | F群 | 記事 EN 更新 → JP | 数字待ちだが、**仕組みと検証手順は今書ける**。冗長化の記述は S20b の結果で書き換えが要る（現状の主張は実測より強い） |
@@ -227,7 +227,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | 要件 | 状態 | どうやるか |
 |---|---|---|
 | **x402 決済** | ✅ **完了・実測済み** | `skills/self/shelter/python/x402_pay.py`。`eth_account` + `requests` のみ。**実 tx `0x315fe61b…`、Base block 49161947、receipt status 0x1**。13 tests。黙って失敗する定数3つ: header は v2 で `PAYMENT-SIGNATURE`（v1 の `X-PAYMENT` を送ると **402 が返るだけで原因が見えない**）／amount は base unit なので**変換したら署名は有効なまま違う額を払う**／署名の `0x` は `HexBytes.hex()` が付けない |
-| heartbeat 署名 | ⏳ 残 | ed25519。`PyNaCl` か `solders.Keypair.sign_message`。JS 版と同じ canonical JSON を署名すれば検証器を共用できる |
+| heartbeat 署名 | ✅ **完了・実測済み** | `skills/self/shelter/python/heartbeat.py` + `modal-heartbeat.mjs`。Modal sandbox `sb-0l4DnecMvMpXm4OzLLcFTn` 内だけで一時 Ed25519 鍵を生成し、同一公開鍵で約5.3秒間隔の2周期を署名（slot `435525136`→`435525148`）。既存 JS verifier + `citizen-steward --verify --rpc` が **2/2 PASS、blockhash も実 slot と一致**。証拠: `specs/evidence/s20b-python-heartbeat-sb-0l4DnecMvMpXm4OzLLcFTn.jsonl`。成功サイクルの実費は create $0.012 + exec $0.003 = **$0.015**。API の1引数2000文字制限を live で発見し、公開ソースを複数引数へ分割する回帰テストを追加。長期 wallet secret は sandbox に渡していない |
 | 決算書 serve | ⏳ 残 | `http.server` で足りる。`statement.mjs` の allowlist 設計をそのまま移植（**blacklist にしない** — Solana の署名と秘密鍵は base58 87-88字で形が同じ） |
 
 #### S21: Mac を外す — **判定 FEASIBLE-WITH-EFFORT**
