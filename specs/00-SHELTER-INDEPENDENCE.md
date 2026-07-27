@@ -260,6 +260,44 @@ Python から Nosana に job を post する経路を一次ソースで確認し
 
 **Node の agent は2軒目で動かない**（`Only managed image python:3.11 is currently available.`）。「大家が2社ある」は真、「同じものが両方で動く」は偽。**S20b 完了後に書けば真になる** — だから記事は S20b の後。JP 版は 07-27 分が未着手。
 
+### 稼ぎ loop の実稼働状況（2026-07-27 実測・ログ全読み）
+
+**PM は dry ではない。実注文・実約定・実 redeem が回っている。**
+
+| 観測 | 証拠（`~/.hermes/state/pm-live-trade.log`） |
+|---|---|
+| 実 redeem 2回 | `pUSD after: 7.086184 (recovered: 6.0)` / `pUSD after: 7.572182 (recovered: 6.994283)` |
+| 実発注 | `YES 7@0.53 ok=True status=live id=0x66dfd152c4` ほか計7件 |
+| 資金の循環 | 1.086 → 展開 → 7.086 → 展開 → 0.578 → 7.572 |
+| 現在 | deposit wallet `0x904B50d2…` に **7.572 pUSD** |
+
+**★ ただし「いくら儲かったか」はこのログからは分離できない ★** `recovered` は元本の戻りと利鞘が混ざった数字で、各サイクルの展開額が記録されていない。**これが 13c（Life Manager の earnings-ledger に記帳）が要る理由そのもの。** 台帳が無いと、実際に金が動いていても収益を主張できない。
+
+**earn-watch の redeem 脚は死んでいた（別経路が生きていたので損害はゼロ）**: `earn-watch.sh:23` が裸の `timeout` を呼び、launchd の PATH に無いので `REDEEMABLE=2 -> redeeming` の直後に落ちていた。spec は「このバグは潰した」と書いていたが、**実際に直っていたのは `reinvest.sh` だけで `earn-watch.sh` は直っていなかった**。絶対パスに修正済み（`bash -n` 通過、launchd 相当 PATH で実行して exit 0）。**redeem 自体は pm-live-trade 側が実行していたので取り残された金は無い** — 「片方が壊れていたが冗長経路が拾っていた」ケース。**一般法則: 同じバグを複数ファイルで踏んでいる時、1つ直して「潰した」と書くと残りが見えなくなる。修正は grep で全件確認してから完了と書く。**
+
+| loop | 状態 |
+|---|---|
+| `pm-live-trade` | ✅ 実稼働（1時間ごと・実約定・実 redeem） |
+| `reinvest` | ✅ 稼働（`yield_hold` を正常出力） |
+| `earn-watch` | 🔧 redeem 脚を修正（冗長経路が生きていたため実害なし） |
+| Hummingbot MM | ⏸ 未着手（運用資本 $100+ 待ち） |
+| x402 売り | 🔴 出品済み・**外部購入 0 件** |
+
+### 自活に必要な額（実測単価から算出）
+
+| 項目 | 実測単価 | 24/7 の月額 |
+|---|---|---|
+| 住処（Nosana 最安 GPU market） | **$0.04796/hr** | **$34.5** |
+| 2軒目 standby（Modal, CPU 300s） | $0.01/300s | 常時なら $86（**失敗時のみ使う前提**なので実質 ~$1） |
+| 思考（frontier, x402） | **$0.003/call** | 20 call/hr なら **$43** |
+| Solana 手数料 | ~0.000005 SOL/tx | 実質 0（ただし 0.005 SOL の床は常時保持） |
+| Base gas | **0**（EIP-3009 は署名のみ、受取側が払う） | 0 |
+| **合計** | | **月 $78 前後**（住処 $35 + 思考 $43） |
+
+**節約版**: 思考を 5 call/hr に落とせば月 $46。**最小生存（住処だけ・思考は必要時）なら月 $35。**
+
+**現在の収入**: 外部から **$0.00**。PM の利鞘は実在するが台帳が無く分離できない。yield は月 $0.02。**したがって自活まで足りないのは月 $35〜78。**
+
 ### 実装の回し方（Dais 裁定 2026-07-27）
 
 **実装は executor subagent に出す。orchestrator は spec 管理と E2E 検証に専念する。** 理由は context — 実装の生ツール出力を orchestrator の窓に流し込むと、順序の正本（この spec）を保つ余力が先に尽きる。手順は flow A hybrid: spec/plan を書く → `.worktrees/<id>/` を切る → executor が TDD で実装 → orchestrator が実チェーン/実コマンドで検証 → merge → worktree 削除。**executor には `--live` を絶対に渡させない**（実際に金が動く操作は orchestrator が自分で撃って自分で検証する）。
