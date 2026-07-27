@@ -236,7 +236,7 @@ function rpcBody(method, params) {
   return JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
 }
 
-async function fetchIndependentFinancialSnapshot(publicFetch, statement) {
+export async function fetchIndependentFinancialSnapshot(publicFetch, statement) {
   const base = statement.wallets.base;
   const calldata = `0x70a08231${"0".repeat(24)}${base.slice(2).toLowerCase()}`;
   const baseResponse = await checkedJson(publicFetch, BASE_RPC_URL, {
@@ -366,7 +366,7 @@ export async function fetchTunnelRouteDirect(
   const hostname = new URL(validatedOrigin).hostname;
   let addresses = [];
   let resolutionError;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     try {
       addresses = [...new Set(await resolve4Impl(hostname))].sort();
       if (addresses.length > 0) break;
@@ -374,7 +374,7 @@ export async function fetchTunnelRouteDirect(
     } catch (error) {
       resolutionError = error;
     }
-    if (attempt < 3) await sleepImpl(500);
+    if (attempt < 11) await sleepImpl(1000);
   }
   if (addresses.length === 0) throw resolutionError;
 

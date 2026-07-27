@@ -200,7 +200,7 @@ test("tunnel fetch bypasses a stale system DNS cache while preserving TLS hostna
       resolve4Impl: async (hostname) => {
         assert.equal(hostname, "spring-river-123.trycloudflare.com");
         resolveCalls += 1;
-        if (resolveCalls === 1) {
+        if (resolveCalls <= 4) {
           const error = new Error("queryA ENOTFOUND");
           error.code = "ENOTFOUND";
           throw error;
@@ -220,7 +220,7 @@ test("tunnel fetch bypasses a stale system DNS cache while preserving TLS hostna
   );
 
   assert.equal(route.status, 200);
-  assert.deepEqual(sleeps, [500]);
+  assert.deepEqual(sleeps, [1000, 1000, 1000, 1000]);
   assert.deepEqual(calls, [{
     ip: "104.16.230.132",
     hostname: "spring-river-123.trycloudflare.com",
