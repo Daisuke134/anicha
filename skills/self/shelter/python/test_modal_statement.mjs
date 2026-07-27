@@ -240,6 +240,8 @@ test("paid proof fetches three live routes and independently re-reads every rail
   ];
   const paidFetch = async () => paidResponses.shift();
   const publicCalls = [];
+  let statementRouteCalls = 0;
+  const sleeps = [];
 
   const publicFetch = async (url, init = {}) => {
     publicCalls.push({ url, init });
@@ -250,6 +252,14 @@ test("paid proof fetches three live routes and independently re-reads every rail
       );
     }
     if (url === `${PUBLIC_URL}/statement.json`) {
+      statementRouteCalls += 1;
+      if (statementRouteCalls === 1) {
+        return response({
+          ...STATEMENT,
+          generatedAt: STATEMENT.generatedAt - 1,
+          balances: { ...STATEMENT.balances, baseUsdc: 1.844 },
+        });
+      }
       return response(STATEMENT);
     }
     if (url === `${PUBLIC_URL}/heartbeats`) {
@@ -292,6 +302,7 @@ test("paid proof fetches three live routes and independently re-reads every rail
     baseKey: `0x${"11".repeat(32)}`,
     fetchImpl: paidFetch,
     publicFetch,
+    sleepImpl: async (milliseconds) => sleeps.push(milliseconds),
     tunnelRouteFetch: async (origin, path, expectedContentType) => {
       const publicResponse = await publicFetch(`${origin}${path}`);
       const text = await publicResponse.text();
@@ -307,7 +318,9 @@ test("paid proof fetches three live routes and independently re-reads every rail
   assert.equal(result.heartbeatVerification.entries.length, 2);
   assert.deepEqual(result.comparison, { ok: true, differences: [] });
   assert.deepEqual(result.routes, { "/": 200, "/statement.json": 200, "/heartbeats": 200 });
+  assert.deepEqual(sleeps, [1500]);
+  assert.equal(statementRouteCalls, 2);
   assert.equal(publicCalls.some((call) => call.url === "https://mainnet.base.org"), true);
-  assert.equal(publicCalls.filter((call) => call.url === "https://api.mainnet-beta.solana.com").length, 2);
+  assert.equal(publicCalls.filter((call) => call.url === "https://api.mainnet-beta.solana.com").length, 4);
   assert.equal(publicCalls.some((call) => call.url.includes("data-api.polymarket.com/positions")), true);
 });

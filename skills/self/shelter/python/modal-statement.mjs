@@ -387,6 +387,7 @@ export async function proveModalStatement({
   baseKey,
   fetchImpl,
   publicFetch = fetch,
+  sleepImpl = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   tunnelRouteFetch = fetchTunnelRouteDirect,
 } = {}) {
   const command = buildStatementCommand();
@@ -428,34 +429,56 @@ export async function proveModalStatement({
   if (!schema.ok) return { ok: false, sandboxId, url: control.url, reason: schema.reason };
 
   try {
-    const [htmlRoute, jsonRoute, heartbeatRoute] = await Promise.all([
+    let [htmlRoute, jsonRoute, heartbeatRoute] = await Promise.all([
       tunnelRouteFetch(control.url, "/", "text/html"),
       tunnelRouteFetch(control.url, "/statement.json", "application/json"),
       tunnelRouteFetch(control.url, "/heartbeats", "application/x-ndjson"),
     ]);
-    if (!htmlRoute.text.includes("$0.00 from outside") || !htmlRoute.text.includes(sandboxId)) {
-      throw new Error("public HTML omits the zero-revenue truth or sandbox identity");
-    }
-    const publicStatement = JSON.parse(jsonRoute.text);
-    const publicSchema = validatePublicStatement(publicStatement, sandboxId);
-    if (!publicSchema.ok) throw new Error(publicSchema.reason);
-    if (publicStatement.generatedAt < control.statement.generatedAt) {
-      throw new Error("public statement predates its control snapshot");
-    }
-    for (const field of ["wallets", "economy", "heartbeats"]) {
-      if (JSON.stringify(publicStatement[field]) !== JSON.stringify(control.statement[field])) {
-        throw new Error(`public statement changed immutable ${field}`);
+
+    const readAndValidatePublicStatement = () => {
+      if (!htmlRoute.text.includes("$0.00 from outside") || !htmlRoute.text.includes(sandboxId)) {
+        throw new Error("public HTML omits the zero-revenue truth or sandbox identity");
       }
-    }
+      const current = JSON.parse(jsonRoute.text);
+      const publicSchema = validatePublicStatement(current, sandboxId);
+      if (!publicSchema.ok) throw new Error(publicSchema.reason);
+      if (current.generatedAt < control.statement.generatedAt) {
+        throw new Error("public statement predates its control snapshot");
+      }
+      for (const field of ["wallets", "economy", "heartbeats"]) {
+        if (JSON.stringify(current[field]) !== JSON.stringify(control.statement[field])) {
+          throw new Error(`public statement changed immutable ${field}`);
+        }
+      }
+      return current;
+    };
+
+    let publicStatement = readAndValidatePublicStatement();
     const heartbeatVerification = verifyModalHeartbeatOutput({
       stdout: heartbeatRoute.text,
       sandboxId,
       minimumRows: 2,
     });
     if (!heartbeatVerification.ok) throw new Error(heartbeatVerification.reason);
-    const independent = await fetchIndependentFinancialSnapshot(publicFetch, publicStatement);
-    const comparison = compareFinancialSnapshots(publicStatement, independent);
-    if (!comparison.ok) throw new Error("published financial values differ from independent reads");
+
+    let independent;
+    let comparison;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      independent = await fetchIndependentFinancialSnapshot(publicFetch, publicStatement);
+      comparison = compareFinancialSnapshots(publicStatement, independent);
+      if (comparison.ok) break;
+      if (attempt === 3) {
+        throw new Error(
+          `published financial values differ after 4 bounded reads: ${JSON.stringify(comparison.differences)}`,
+        );
+      }
+      await sleepImpl(1500);
+      [htmlRoute, jsonRoute] = await Promise.all([
+        tunnelRouteFetch(control.url, "/", "text/html"),
+        tunnelRouteFetch(control.url, "/statement.json", "application/json"),
+      ]);
+      publicStatement = readAndValidatePublicStatement();
+    }
 
     return {
       ok: true,
