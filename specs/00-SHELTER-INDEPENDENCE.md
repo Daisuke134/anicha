@@ -224,14 +224,16 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 ### 待たない（今やる。全部こちらだけで閉じる）
 
-| 順 | ID | やること | なぜこの順か |
+**現在地**: 支出側は完全に閉じた（家を買う・飯を買う・自分で延長する・尽きる前に止まる・尽きたら補給する）。残っているのは**冗長化が本物かどうか**と、**Mac を外すこと**。
+
+| 順 | ID | やること | 状態 / なぜこの順か |
 |---|---|---|---|
-| ~~1~~ | S18 | **renewer に金の床**（残高が fee floor を割ったら延長を止め、家を明け渡す） | 実測: job `AzUFmVa5` が 600→**19800秒**まで自己延長し、shelter wallet を 0.894→**0.027 NOS** まで焼いた。時間の天井はあるが金の床が無い。**これを入れる前に入金すると穴の空いたバケツになる**ので、入金判断より先 | ✅ **完了 2026-07-27**。床の値付けが設計の核: **床 = 引っ越し代**（新規 confidential post の escrow 0.34 NOS）。最後の1枚まで延長に使う agent は次の手が無いが、早く止まる agent はまだ引っ越せる。**止まるのは生き残れるが、枯れるのは生き残れない**。実装2箇所（`renew.mjs` の純関数 + container 内 inline renewer。財布を焼いたのは後者なので両方必須）。140/140 tests、うち①live drain の再現テスト（0.894 NOS で回すと 19800秒に届く前に reserve を残して停止）②boot script の順序テスト（残高チェックが `jobs.extend` の**前**にあること — 支出の後に置いた床は床ではない）。**実残高で検証: 0.026681 NOS → `renew=false`「paying for this extension would spend the 0.34 NOS kept to move house」**
-| ~~2~~ | S19 | 収入 → bridge → swap → **sub-wallet top-up** の自動補給 | ✅ **完了 2026-07-27**。main merge 済み（167 tests）。**live 実行で shelter wallet 0.0267 → 0.5 NOS（cap ちょうど）、treasury 0.607 → 0.134、tx `aYGEcC5k…` finalized**。設計で効いた判断: 既に正しいチェーンに金がある時は **bridge も swap もしない**（手数料の丸損）。実行して初めて出た欠陥2件は下記
-| 🔄 3 | S20 | 2軒目へ**引っ越す** | 🔄 **半分完了 2026-07-27**。✅ 入居実証: sandbox `sb-f1BnTvx1NhWSnJSPXQ6VBR` の中から実出力 `3.11.12 modal`（`skills/self/shelter/move-in.mjs`、149→167 tests）。判定は「API が running と言った」ではなく**中のプロセスにしか出せない出力があること**（exec が ok でも stdout 空なら「住めていない」と言う）。❌ **残: 2軒目で生存できない** — 下記の硬い制約
-| 4 | S21 | bootstrap を Modal へ（Mac の関与を「投資」だけにする） | 今も1軒目の点火は Mac。これを外すと人間の残存関与が資金だけになる | ⏳ 待機。**S13 の制約が効く**: confidential post は poster プロセスが claim+delivery まで生存必須。だから「Mac を外す」= poster を Modal box 上で走らせる、が具体的な形。S20 が先（住める箱がないと poster を置く場所が無い）
-| 5 | D群 | Life Manager 設計（custody / dashboard / cap UI / 法務） | 上の4つが揃って初めて「Franklin 群を管理する」対象が実在する |
-| 6 | F群 | 記事 EN 更新 → JP | 数字が出揃ってから書く。ただし**待ちの間に書ける部分（仕組み・検証手順）は先に書いておく** |
+| ~~1~~ | S18 | renewer に金の床 | ✅ 完了。実残高 0.0267 NOS で `renew=false` を実測 |
+| ~~2~~ | S19 | 収入 → bridge → swap → sub-wallet top-up | ✅ 完了。live で 0.0267→0.5 NOS、tx `aYGEcC5k…` finalized |
+| **1** | **S20b** | **2軒目で生き延びる（Python 版の最小生存機能）** | 🔄 **次に着手**。S20 の入居は済んだが、2軒目は `python:3.11` のみで **node が無く Franklin が動かない**。要るもの: ①ed25519 で blockhash 署名（heartbeat）②決算書の serve ③**x402 決済を手組み**（python SDK v2 に EVM exact scheme が無い — `x402.clients` は存在せず `x402[evm]` を入れても `x402_evm` は生えない。402 の中身は実測済み: `scheme:exact / eip155:8453 / USDC / EIP-3009`）。**これが無い限り「大家が2社」は書けても「2社で生きられる」は書けない** |
+| 2 | S21 | bootstrap を Modal へ（Mac の関与を資金だけにする） | S20b の後。**S13 の制約が効く**: confidential post は poster プロセスが claim+delivery まで生存必須 → 「Mac を外す」の具体形は「poster を2軒目で走らせる」。だが2軒目は python のみなので、poster を python から叩けるか（= Nosana の job post を python で組めるか）が S20b と同じ壁 |
+| 3 | D群 | Life Manager 設計（custody / dashboard / cap UI / 法務） | 上が揃って初めて「管理する対象」が実在する |
+| 4 | F群 | 記事 EN 更新 → JP | 数字待ちだが、**仕組みと検証手順は今書ける**。冗長化の記述は S20b の結果で書き換えが要る（現状の主張は実測より強い） |
 
 ### 実装の回し方（Dais 裁定 2026-07-27）
 
