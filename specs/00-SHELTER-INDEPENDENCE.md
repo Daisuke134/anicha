@@ -95,68 +95,36 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 ## D. Life Manager × Franklin — 製品の姿と最終形（Dais 2026-07-26 裁定）
 
-### ★ 実測（2026-07-27）: Life Manager は「merge 先」ではなく「新規に建てる場所」★
+### ★ 訂正（2026-07-27 深夜）: 前の「Life Manager には何も無い」は誤り — repo を取り違えていた ★
 
-repo `/Users/anicca/Projects/life-manager` を実際に読んだ結果、この節の前提が**事実と食い違っていた**。
+**間違いの経緯**: 調査を `/Users/anicca/Projects/life-manager` に対して走らせ、「wallet も payment も agent も無い」と結論した。**本物は `/Users/anicca/Projects/life-manager-main`**。見分け方は commit の新しさ（main は #1178 まで進んでいる／もう一方は 2026-07-11 で停止）。**一般法則: 同名の repo コピーが複数ある環境では、調査結果を採用する前に「一番新しい commit を持つのはどれか」を先に確定する。** colony の home 取り違えと完全に同型で、今回は**自分の調査 agent に間違った場所を指させた**ので俺の指示ミス。
 
-| 前提していたこと | 実測 |
+### Life Manager の FINANCIAL organ — 実際に本番で生きているもの
+
+正本: `life-manager-main/docs/handovers/2026-07-27-crypto-track-handoff.md` と同 repo の consolidation spec §9.8 / §9.11 / §10。
+
+| 部品 | 実体 | 状態 |
+|---|---|---|
+| agent wallet | **`0x477EeE969ccfdc0e959F38cE8B83e372FC0262ad`（Base）** | 鍵は 0600 の protected store、repo/log/git に露出 0。**残高 0、seed 未定 — 勝手に入金経路を作るなと明記** |
+| user への送金先 | **`0x6592EB8EF820aBC092e8C3474fb2042dffCCEDc7`** | 実 DB row、EIP-55 検証済み、`status: usable` |
+| 収支台帳 | `lib/earnings-ledger.js` + `earnings-runtime.js` | append-only・minor-unit BigInt・損失月も盛らない月次 rollup・逐語 copy 生成。**45 tests merged、実収支行は 0 行** |
+| 法的立ち位置 | spec §9.8 | **「AI が自分の wallet で稼ぐ。user 資産運用ではない」** |
+
+**残っている2 leg（＝こちらの成果が刺さる場所）**
+- **13c**: こちらの earn loop の実収益1件を `earnings-runtime` 経由で記帳 → 月次報告が実データで生成される（engine は完成、**行が無いだけ**）
+- **13d-b**: agent wallet → `0x6592…EDc7` への on-chain 実 tx + §9.11 逐語 copy での TG 報告（前提: wallet に残高）
+
+**破ると reject される約束**: ①台帳は向こうが正本、**こちら側に別台帳を立てない** ②user から取る個人情報は送金先1つだけ、追加要求禁止 ③損失月も正直に ④tx は basescan link 付き ⑤spend-cap = 残高、超過はコードで不能に ⑥変更は PR + fresh adversary review
+
+### Life Manager は何なのか（3択への回答）
+
+| 案 | 判定 |
 |---|---|
-| Franklin 群の管理画面に育てられる製品がある | **無い**。中身はカレンダー連携の電話リマインダー（Telnyx + Gemini Live で予定15分前に架電）。README 実物の一行がそれを言っている |
-| 金を扱う部分がある | **無い**。wallet / payment / stripe / x402 / solana / USDC / spend-cap を全文検索して**ヒット0**。唯一の `crypto` 使用は承認トークンの sha1 |
-| agent 系の足場がある | **無い**。`franklin|nosana|shelter` の検索も**ヒット0**。`agent/resolve.py` はあるが「予定の場所を推測する LLM」であって別物 |
-| server / API 層がある | **無い**。`openclaw cron` から叩く CLI 群のみ。root に `package.json` すら無い |
-| merge 設計の doc がある | **無い** |
+| Franklin 群の管理者 | ❌ 違う。管理対象としての Franklin 群は存在しないし、必要でもない |
+| **自分の wallet を持ち、自分の道具・計算・住処を払い、自分のために稼ぐ agent** | ✅ **これ**。spec §9.8 が明示（「AI が自分の wallet で稼ぐ。user 資産運用ではない」）。送金先が既に取ってあるのは、稼いだ分を人間に**送る**ため |
+| Franklin そのもの | ❌ 違う。Franklin は道具（`@blockrun/franklin`）であって主体ではない |
 
-**したがって D群は「merge」ではなく「ゼロから作る」。** 唯一の接続点らしい接続点は `adapters/transport.{js,py}`（local/cloud を抽象化している唯一の場所）で、新しい transport を足す型として使える。それ以外は全部新規。
-
-**この訂正が順序に効く**: D群を「既存製品への統合」だと思っていたから軽く見積もっていた。実際は独立した新規プロダクトなので、**S20b/S21（生存の完成）より後ろで正しい**。生きている Franklin が1体もいない状態で管理画面を作るのは、管理対象のない管理者を作ること。
-
-
-### Q. Life Manager は Franklin 自身か、Franklin 群の管理者か
-
-**答え: 両方。ただし段階が違う。** Life Manager は「Franklin を雇う側」として始まり、最終的に「自分も Franklin である管理者」になる。
-
-- **管理者としての Life Manager**: ユーザーの USDC を受け取り、cap を決め、複数の Franklin に配分し、成績を見る。ユーザーから見た製品の顔。
-- **Franklin としての Life Manager**: 自分自身も cloud に住み、自分の家賃と推論代を自費で払う。人間の subscription に依存しない。
-
-前者だけだと「管理者は誰が養うのか」が残る。後者を satisfies して初めて自走する。
-
-### 構造
-
-```
-ユーザー ──USDC──▶ Life Manager（管理者 兼 出資者。自身も cloud 常駐）
-                        │ 配分・cap・成績監視
-              ┌─────────┼─────────┐
-              ▼         ▼         ▼
-         Franklin#1  Franklin#2  Franklin#N   ← 全員 cloud 常駐
-         各自 wallet / 家賃と推論代を自費 / 各自が稼ぐ
-              └──── 稼ぎ ────▶ ユーザー
-```
-
-### 最終形へのフェーズ（「全部無料になる」までの道筋）
-
-| Phase | 誰が払うか | 何が要るか | 現在地 |
-|---|---|---|---|
-| **P0 実験** | Dais が全額 | 部品の実証 | ✅ 完了。家(lease)も餌(frontier)も自費で払える経路を tx で実証（S12c/S15） |
-| **P1 有料製品** | ユーザーが subscription/USDC を払う | Life Manager が Franklin を cloud で回し、ユーザーの資金を運用して増やす | 🔄 ここへ向かう。custody 設計・dashboard・cap UI が要る |
-| **P2 自己負担** | Franklin の稼ぎが自分の家賃+推論代を上回る | 稼ぎ rail が黒字（yield/trade/x402 売上） | 未達。支出 rail は開通、収入 rail が細い |
-| **P3 自己増殖** | 余剰で新しい Franklin を建てる | 黒字 + 自動 spawn | 未着手 |
-| **P4 無料化** | ユーザーは払わない。Franklin の稼ぎが全コストを賄う | P2 の黒字が全ユーザー分をカバー | 最終形。ここで human credential も subscription も不要になる |
-
-**P4 の条件を数字で書く**: Franklin 1体の月コストは、lease を 24/7 で回して約 $35（$0.048/hr × 720h）+ 推論代。1体が月 $35 以上を安定して稼げば自己負担が成立し、それを超えた分がユーザーへの還元と新規 Franklin の原資になる。**現状の稼ぎは月 $0 なので、ここが唯一の壁。**
-
-### 未解決（設計判断が要る）
-
-1. **custody**: non-custodial（ユーザー自身の wallet から Franklin へ直接）が最も安全で法的にも軽い。
-2. **成績の見せ方**: 入出金と損益を on-chain で追える dashboard。「自己申告でなく chain で検証」を貫く。
-3. **cap と停止権**: ユーザーが握る唯一のノブ。いつでも引き上げ・停止できること。
-4. **複数 Franklin の分業**: 戦略別に分けるか、同戦略で冗長化するか。
-5. **法的位置づけ**: 他人の資金運用は規制対象になり得る。non-custodial 設計で回避できるか **未調査**。
-
-### done 条件（このセクション）
-
-ユーザー1人が自分の wallet から Franklin 1体に USDC を送り、その Franklin が cloud で自費稼働し、稼ぎがユーザーの wallet に戻る。全段 on-chain 検証可能。
-
+**したがって shelter の仕事は「別製品」ではなく「Life Manager の agent が Mac の外で生き、自分の計算を自分で払うための臓器」。** merge とは、こちらが**on-chain の事実を作り**、向こうの台帳が**それを記録し**、向こうの copy bank が**それを報告する**、という3段の接続のこと。
 
 ## E. 実測で得た全 gotcha（再発見コスト回避・2026-07-26）
 
