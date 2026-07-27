@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+import argparse
+import base58
 from html import escape
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import io
 import json
 import math
+import os
+from pathlib import Path
 import re
+import subprocess
+import sys
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
+
+from nacl.signing import VerifyKey
+
+from heartbeat import build_heartbeat_message, emit_heartbeats
 
 
 BASE_RPC_URL = "https://mainnet.base.org"
@@ -38,6 +50,11 @@ PUBLIC_NESTED = {
 
 _EVM_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _SOLANA_ADDRESS = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+_TUNNEL_URL = re.compile(r"https?://[a-z0-9-]+\.trycloudflare\.com")
+
+DEFAULT_BASE_ADDRESS = "0x810f6d61f7606deee2657d3083e150a222bc29c5"
+DEFAULT_SOLANA_ADDRESS = "71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf"
+DEFAULT_POLYMARKET_ADDRESS = "0x904B50d2e214Da947d83D6a2D32c4E3Ffc17Eb74"
 
 
 def request_json(url, payload=None):
@@ -311,5 +328,232 @@ public snapshot is at <code>/statement.json</code>.</p>
 """
 
 
+def make_statement_handler(statement, heartbeat_jsonl):
+    statement = allowlist_public_statement(statement)
+    html_body = render_statement_html(statement).encode("utf-8")
+    json_body = (json.dumps(statement, separators=(",", ":")) + "\n").encode("utf-8")
+    heartbeat_body = heartbeat_jsonl.encode("utf-8")
+    routes = {
+        "/": ("text/html; charset=utf-8", html_body),
+        "/statement.json": ("application/json; charset=utf-8", json_body),
+        "/heartbeats": ("application/x-ndjson; charset=utf-8", heartbeat_body),
+    }
+
+    class StatementHandler(BaseHTTPRequestHandler):
+        def _respond(self, include_body):
+            route = routes.get(self.path)
+            if route is None:
+                self.send_error(404, "not found")
+                return
+            content_type, body = route
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            if include_body:
+                self.wfile.write(body)
+
+        def do_GET(self):
+            self._respond(include_body=True)
+
+        def do_HEAD(self):
+            self._respond(include_body=False)
+
+        def log_message(self, *_args):
+            return
+
+    return StatementHandler
+
+
+def serve_statement(*, statement_file, heartbeats_file, port):
+    statement = json.loads(Path(statement_file).read_text(encoding="utf-8"))
+    heartbeat_jsonl = Path(heartbeats_file).read_text(encoding="utf-8")
+    handler = make_statement_handler(statement, heartbeat_jsonl)
+    server = ThreadingHTTPServer(("127.0.0.1", int(port)), handler)
+    server.serve_forever()
+
+
+def extract_tunnel_url(log_text):
+    if not isinstance(log_text, str):
+        raise ValueError("tunnel log must be text")
+    matches = _TUNNEL_URL.findall(log_text)
+    if len(matches) != 1:
+        raise ValueError("tunnel log must contain exactly one Quick Tunnel URL")
+    parsed = urlsplit(matches[0])
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname is None
+        or not parsed.hostname.endswith(".trycloudflare.com")
+        or parsed.port is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("tunnel URL must be a bare HTTPS trycloudflare.com origin")
+    return matches[0]
+
+
+def _verify_heartbeat_row(row):
+    try:
+        verify_key = VerifyKey(base58.b58decode(row["payer"]))
+        signature = base58.b58decode(row["sig"])
+        verify_key.verify(build_heartbeat_message(row).encode("utf-8"), signature)
+        return True
+    except Exception:
+        return False
+
+
+def launch_public_statement(
+    *,
+    cloudflared_path,
+    port,
+    sandbox_id,
+    base_address,
+    solana_address,
+    polymarket_address,
+    request_json=request_json,
+    heartbeat_emitter=emit_heartbeats,
+    heartbeat_verifier=_verify_heartbeat_row,
+    popen=subprocess.Popen,
+    sleep=time.sleep,
+    read_text=lambda path: Path(path).read_text(encoding="utf-8"),
+    temporary_root=Path("/tmp/s20b-statement"),
+    now_ms=lambda: int(time.time() * 1000),
+):
+    temporary_root = Path(temporary_root)
+    temporary_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    heartbeat_file = temporary_root / "heartbeats.jsonl"
+    statement_file = temporary_root / "statement.json"
+    tunnel_log = temporary_root / "cloudflared.log"
+
+    heartbeat_output = io.StringIO()
+    heartbeat_rows = heartbeat_emitter(
+        job_address=sandbox_id,
+        cycles=2,
+        interval_seconds=5,
+        output=heartbeat_output,
+    )
+    heartbeat_jsonl = heartbeat_output.getvalue()
+    heartbeat_file.write_text(heartbeat_jsonl, encoding="utf-8")
+    statement_heartbeats = [
+        {**row, "verified": heartbeat_verifier(row)}
+        for row in heartbeat_rows
+    ]
+    statement = build_public_statement(
+        sandbox_id=sandbox_id,
+        base_address=base_address,
+        solana_address=solana_address,
+        polymarket_address=polymarket_address,
+        request_json=request_json,
+        heartbeats=statement_heartbeats,
+        now_ms=now_ms,
+    )
+    statement_file.write_text(
+        json.dumps(statement, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+    server_process = popen(
+        [
+            sys.executable,
+            str(Path(__file__)),
+            "serve",
+            "--statement-file",
+            str(statement_file),
+            "--heartbeats-file",
+            str(heartbeat_file),
+            "--port",
+            str(port),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
+    tunnel_process = popen(
+        [
+            str(cloudflared_path),
+            "tunnel",
+            "--no-autoupdate",
+            "--url",
+            f"http://127.0.0.1:{port}",
+            "--logfile",
+            str(tunnel_log),
+            "--loglevel",
+            "info",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
+
+    last_log = ""
+    for _ in range(50):
+        if server_process.poll() is not None:
+            raise RuntimeError("statement server exited before the tunnel became ready")
+        if tunnel_process.poll() is not None:
+            raise RuntimeError("cloudflared exited before publishing a URL")
+        try:
+            last_log = read_text(tunnel_log)
+        except (FileNotFoundError, OSError):
+            last_log = ""
+        try:
+            url = extract_tunnel_url(last_log)
+            return {
+                "ok": True,
+                "sandboxId": sandbox_id,
+                "url": url,
+                "statement": statement,
+            }
+        except ValueError:
+            sleep(0.5)
+    raise TimeoutError("Quick Tunnel did not publish one valid URL within 25 seconds")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Serve a public Python second-house statement")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    serve_parser = subparsers.add_parser("serve")
+    serve_parser.add_argument("--statement-file", required=True)
+    serve_parser.add_argument("--heartbeats-file", required=True)
+    serve_parser.add_argument("--port", type=int, default=8080)
+
+    launch_parser = subparsers.add_parser("launch")
+    launch_parser.add_argument("--cloudflared", required=True)
+    launch_parser.add_argument("--port", type=int, default=8080)
+    launch_parser.add_argument("--base-address", default=DEFAULT_BASE_ADDRESS)
+    launch_parser.add_argument("--solana-address", default=DEFAULT_SOLANA_ADDRESS)
+    launch_parser.add_argument("--polymarket-address", default=DEFAULT_POLYMARKET_ADDRESS)
+
+    args = parser.parse_args(argv)
+    if args.command == "serve":
+        serve_statement(
+            statement_file=args.statement_file,
+            heartbeats_file=args.heartbeats_file,
+            port=args.port,
+        )
+        return 0
+
+    sandbox_id = os.environ.get("MODAL_SANDBOX_ID")
+    if not sandbox_id:
+        parser.error("MODAL_SANDBOX_ID is required")
+    result = launch_public_statement(
+        cloudflared_path=args.cloudflared,
+        port=args.port,
+        sandbox_id=sandbox_id,
+        base_address=args.base_address,
+        solana_address=args.solana_address,
+        polymarket_address=args.polymarket_address,
+    )
+    sys.stdout.write(json.dumps(result, separators=(",", ":")) + "\n")
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit("statement.py: use an explicit CLI mode")
+    raise SystemExit(main())
