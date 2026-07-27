@@ -328,24 +328,27 @@ public snapshot is at <code>/statement.json</code>.</p>
 """
 
 
-def make_statement_handler(statement, heartbeat_jsonl):
+def make_statement_handler(statement, heartbeat_jsonl, statement_provider=None):
     statement = allowlist_public_statement(statement)
-    html_body = render_statement_html(statement).encode("utf-8")
-    json_body = (json.dumps(statement, separators=(",", ":")) + "\n").encode("utf-8")
+    if statement_provider is None:
+        statement_provider = lambda: statement
     heartbeat_body = heartbeat_jsonl.encode("utf-8")
-    routes = {
-        "/": ("text/html; charset=utf-8", html_body),
-        "/statement.json": ("application/json; charset=utf-8", json_body),
-        "/heartbeats": ("application/x-ndjson; charset=utf-8", heartbeat_body),
-    }
 
     class StatementHandler(BaseHTTPRequestHandler):
         def _respond(self, include_body):
-            route = routes.get(self.path)
-            if route is None:
+            if self.path == "/heartbeats":
+                content_type, body = "application/x-ndjson; charset=utf-8", heartbeat_body
+            elif self.path in ("/", "/statement.json"):
+                current = allowlist_public_statement(statement_provider())
+                if self.path == "/":
+                    content_type = "text/html; charset=utf-8"
+                    body = render_statement_html(current).encode("utf-8")
+                else:
+                    content_type = "application/json; charset=utf-8"
+                    body = (json.dumps(current, separators=(",", ":")) + "\n").encode("utf-8")
+            else:
                 self.send_error(404, "not found")
                 return
-            content_type, body = route
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
@@ -370,7 +373,24 @@ def make_statement_handler(statement, heartbeat_jsonl):
 def serve_statement(*, statement_file, heartbeats_file, port):
     statement = json.loads(Path(statement_file).read_text(encoding="utf-8"))
     heartbeat_jsonl = Path(heartbeats_file).read_text(encoding="utf-8")
-    handler = make_statement_handler(statement, heartbeat_jsonl)
+    claimed = statement["heartbeats"]["claimed"]
+    verified = statement["heartbeats"]["verified"]
+    heartbeat_rows = [{"verified": index < verified} for index in range(claimed)]
+
+    def current_statement():
+        return build_public_statement(
+            sandbox_id=statement["sandboxId"],
+            base_address=statement["wallets"]["base"],
+            solana_address=statement["wallets"]["solana"],
+            polymarket_address=statement["wallets"]["polymarket"],
+            heartbeats=heartbeat_rows,
+        )
+
+    handler = make_statement_handler(
+        statement,
+        heartbeat_jsonl,
+        statement_provider=current_statement,
+    )
     server = ThreadingHTTPServer(("127.0.0.1", int(port)), handler)
     server.serve_forever()
 

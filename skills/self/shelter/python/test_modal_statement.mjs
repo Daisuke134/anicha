@@ -228,7 +228,11 @@ test("paid proof fetches three live routes and independently re-reads every rail
         ok: true,
         sandboxId: SANDBOX_ID,
         url: PUBLIC_URL,
-        statement: STATEMENT,
+        statement: {
+          ...STATEMENT,
+          generatedAt: STATEMENT.generatedAt - 1,
+          balances: { ...STATEMENT.balances, baseUsdc: 1.844 },
+        },
       })}\n`,
       stderr: "",
       returncode: 0,

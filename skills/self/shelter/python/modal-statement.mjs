@@ -439,8 +439,13 @@ export async function proveModalStatement({
     const publicStatement = JSON.parse(jsonRoute.text);
     const publicSchema = validatePublicStatement(publicStatement, sandboxId);
     if (!publicSchema.ok) throw new Error(publicSchema.reason);
-    if (JSON.stringify(publicStatement) !== JSON.stringify(control.statement)) {
-      throw new Error("control statement and public JSON differ");
+    if (publicStatement.generatedAt < control.statement.generatedAt) {
+      throw new Error("public statement predates its control snapshot");
+    }
+    for (const field of ["wallets", "economy", "heartbeats"]) {
+      if (JSON.stringify(publicStatement[field]) !== JSON.stringify(control.statement[field])) {
+        throw new Error(`public statement changed immutable ${field}`);
+      }
     }
     const heartbeatVerification = verifyModalHeartbeatOutput({
       stdout: heartbeatRoute.text,

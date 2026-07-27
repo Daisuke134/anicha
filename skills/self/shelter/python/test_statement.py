@@ -208,11 +208,16 @@ class StatementHtml(unittest.TestCase):
 class StatementRoutes(unittest.TestCase):
     def setUp(self):
         self.statement = build_fixture()
+        self.current_statement = self.statement
         self.heartbeat_jsonl = (
             '{"v":1,"kind":"shelter-heartbeat","cycle":1}\n'
             '{"v":1,"kind":"shelter-heartbeat","cycle":2}\n'
         )
-        handler = make_statement_handler(self.statement, self.heartbeat_jsonl)
+        handler = make_statement_handler(
+            self.statement,
+            self.heartbeat_jsonl,
+            statement_provider=lambda: self.current_statement,
+        )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -249,6 +254,19 @@ class StatementRoutes(unittest.TestCase):
         self.assertEqual(heartbeats, self.heartbeat_jsonl.encode("utf-8"))
         self.assertEqual(missing_status, 404)
         self.assertEqual(post_status, 501)
+
+    def test_statement_routes_refresh_public_values_at_request_time(self):
+        self.current_statement = {
+            **self.statement,
+            "generatedAt": self.statement["generatedAt"] + 1,
+            "balances": {**self.statement["balances"], "baseUsdc": 1.811},
+        }
+
+        _, _, statement_json = self.fetch("/statement.json")
+        _, _, html = self.fetch("/")
+
+        self.assertEqual(json.loads(statement_json)["balances"]["baseUsdc"], 1.811)
+        self.assertIn(b"$1.811000", html)
 
 
 class FakeProcess:
