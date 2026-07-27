@@ -1,0 +1,247 @@
+#!/usr/bin/env node
+// citizen-refill — S19: turn Base USDC revenue into Solana rent, with zero human step. Thin CLI
+// entrypoint only (repo convention: bin/ stays thin) — the decision lives in
+// skills/self/shelter/nosana/funding/refill.mjs's planRefill/executeRefill, the NOS swap reuses
+// acquire-nos.mjs's acquireNos unchanged, and the bridge leg ports the relay.link flow proven in
+// apps/x402-agents/scripts/bridge-base-to-solana.mjs — none of those are reimplemented here.
+//
+// --dry (DEFAULT): resolves both addresses, reads REAL balances (Solana RPC for NOS/SOL, Base RPC
+//   for USDC), calls planRefill, and prints the plan and its reason. No transaction is built,
+//   signed, or sent — and, matching acquire-nos.mjs/sub-wallet.mjs's own dry-mode convention, no
+//   ledger entry is written either: a plan-and-print has no side effects to record.
+// --live: additionally calls executeRefill (bridge, then swap) and journals the attempt to
+//   ~/.hermes/state/refill.jsonl as an `intent` row before acting, then a `settled` row after —
+//   the same before/after shape sub-wallet.mjs already uses for nosana-subwallet-funding.jsonl.
+//
+// Never prints key material: only public addresses and balances are logged. The Base signing key
+// itself is resolved (via resolve-identity.mjs) only inside the bridge leg, and only under --live.
+//
+// Usage: bin/citizen-refill [--dry|--live] [--help]
+
+import fs from "node:fs";
+import path from "node:path";
+import { resolveSolanaSecret, resolveEvmPrivateKey } from "../skills/earn/lib/resolve-identity.mjs";
+import { deriveAddressFromSecret } from "../skills/self/shelter/nosana/keypair.mjs";
+import { NOS_MINT } from "../skills/self/shelter/nosana/market.mjs";
+import { DEFAULT_RPC_URL } from "../skills/self/shelter/nosana/deploy.mjs";
+import { planRefill, executeRefill } from "../skills/self/shelter/nosana/funding/refill.mjs";
+import { acquireNos } from "../skills/self/shelter/nosana/funding/acquire-nos.mjs";
+import { appendChild } from "../skills/self/spawn/lib/ledger.js";
+import { resolveStateDir } from "../skills/self/spawn/lib/state-path.js";
+
+// Same Base USDC contract and public RPC bridge-base-to-solana.mjs already pays out of / reads
+// against — no API key, no signup, keeps this script runnable with zero new accounts.
+const USDC_BASE_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const BASE_RPC_URL_DEFAULT = "https://base-rpc.publicnode.com";
+const RELAY_QUOTE_URL = "https://api.relay.link/quote";
+// relay.link's placeholder for "native SOL, not an SPL token" — verified in
+// bridge-base-to-solana.mjs's own destinationCurrency.
+const NATIVE_SOL_PSEUDO_MINT = "11111111111111111111111111111111";
+const REFILL_LEDGER_BASENAME = "refill.jsonl";
+
+function log(line) {
+  process.stdout.write(`[citizen-refill] ${line}\n`);
+}
+
+function printHelp() {
+  process.stdout.write(
+    [
+      "Usage: citizen-refill [--dry|--live]",
+      "",
+      "  --dry   (default) read real balances, plan the refill, print it — no transfer.",
+      "  --live  bridge Base USDC to Solana SOL (relay.link) then swap into NOS (Jupiter).",
+      "",
+      "Env: ANICCA_HOME (required), NOSANA_RPC_URL / SOLANA_RPC_URL, BASE_RPC_URL.",
+      "",
+    ].join("\n"),
+  );
+}
+
+/**
+ * Read-only: the `address` field wallet.json already stores next to `privateKey` (verified
+ * against a real instance home), checked in the same priority order resolve-identity.mjs's
+ * resolveEvmPrivateKey uses for the key itself. Deliberately never reads or returns the private
+ * key — a balance check has no business touching signing material.
+ */
+function resolveEvmAddress({ env = process.env } = {}) {
+  const home = env.ANICCA_HOME;
+  const candidates = [];
+  if (home) {
+    candidates.push(path.join(home, ".automaton", "wallet.json"));
+    candidates.push(path.join(home, "wallet.json"));
+  }
+  if (env.HOME) candidates.push(path.join(env.HOME, ".automaton", "wallet.json"));
+  for (const file of candidates) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (typeof parsed.address === "string" && parsed.address.length > 0) return parsed.address;
+    } catch {
+      // try the next candidate — a missing/unreadable file at one priority level is not fatal.
+    }
+  }
+  return null;
+}
+
+/** Real USDC balance on Base via a raw eth_call (balanceOf) — no wallet SDK needed for a read. */
+async function readBaseUsdcBalance({ address, rpcUrl = BASE_RPC_URL_DEFAULT, fetchImpl = fetch }) {
+  const selector = "0x70a08231"; // balanceOf(address)
+  const padded = address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const res = await fetchImpl(rpcUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: USDC_BASE_CONTRACT, data: selector + padded }, "latest"] }),
+  });
+  if (!res.ok) throw new Error(`readBaseUsdcBalance: HTTP ${res.status} from Base RPC`);
+  const json = await res.json();
+  if (json.error) throw new Error(`readBaseUsdcBalance: RPC error ${JSON.stringify(json.error)}`);
+  return Number(BigInt(json.result || "0x0")) / 1e6; // USDC: 6 decimals
+}
+
+/** Real NOS + SOL balances on Solana — same reads citizen-subwallet's `status` mode already does. */
+async function readSolanaBalances({ address, rpcUrl }) {
+  const w3 = await import("@solana/web3.js");
+  const conn = new w3.Connection(rpcUrl, "confirmed");
+  const pub = new w3.PublicKey(address);
+  const solLamports = await conn.getBalance(pub);
+  const resp = await conn.getParsedTokenAccountsByOwner(pub, { mint: new w3.PublicKey(NOS_MINT) });
+  const nos = resp.value.length ? resp.value[0].account.data.parsed.info.tokenAmount.uiAmount : 0;
+  return { solBalance: solLamports / w3.LAMPORTS_PER_SOL, nosBalance: typeof nos === "number" ? nos : 0 };
+}
+
+/**
+ * The bridge leg: Base USDC -> Solana native SOL via relay.link, same quote endpoint/chain ids/
+ * currencies as bridge-base-to-solana.mjs (ported, not reimplemented). viem is imported here, at
+ * call time, not at module load — mirrors buy-house.mjs's payingFetch deferred-import discipline
+ * so --dry (the default, and everything this task verifies) never needs viem installed at all.
+ * Only ever invoked under --live.
+ */
+async function bridgeBaseUsdcToSolanaSol({ amountUsd, solanaRecipient, env = process.env }) {
+  const key = resolveEvmPrivateKey({ env });
+  if (!key) return { ok: false, reason: "no Base signing key resolved for this instance" };
+  const { createWalletClient, createPublicClient, http } = await import("viem");
+  const { privateKeyToAccount } = await import("viem/accounts");
+  const { base } = await import("viem/chains");
+  const account = privateKeyToAccount(key.startsWith("0x") ? key : `0x${key}`);
+
+  const quote = await (
+    await fetch(RELAY_QUOTE_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        user: account.address,
+        recipient: solanaRecipient,
+        originChainId: 8453,
+        destinationChainId: 792703809,
+        originCurrency: USDC_BASE_CONTRACT,
+        destinationCurrency: NATIVE_SOL_PSEUDO_MINT,
+        amount: String(Math.round(amountUsd * 1e6)),
+        tradeType: "EXACT_INPUT",
+      }),
+    })
+  ).json();
+  if (!quote.steps) return { ok: false, reason: `relay gave no route: ${JSON.stringify(quote).slice(0, 200)}` };
+
+  const pub = createPublicClient({ chain: base, transport: http(BASE_RPC_URL_DEFAULT) });
+  const wallet = createWalletClient({ account, chain: base, transport: http(BASE_RPC_URL_DEFAULT) });
+  let lastHash = null;
+  let statusEndpoint = null;
+  for (const step of quote.steps) {
+    for (const item of step.items || []) {
+      const d = item.data;
+      lastHash = await wallet.sendTransaction({ to: d.to, data: d.data, value: BigInt(d.value || 0) });
+      const receipt = await pub.waitForTransactionReceipt({ hash: lastHash });
+      log(`relay step ${step.id}: ${lastHash} status=${receipt.status}`);
+      if (item.check?.endpoint) statusEndpoint = item.check.endpoint;
+    }
+  }
+  if (statusEndpoint) {
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+      const st = await (await fetch(`https://api.relay.link${statusEndpoint}`)).json();
+      log(`relay status: ${st.status}`);
+      if (st.status === "success") return { ok: true, tx: lastHash };
+      if (st.status === "failure" || st.status === "refund") return { ok: false, reason: `relay ${st.status}`, tx: lastHash };
+    }
+  }
+  return { ok: true, tx: lastHash };
+}
+
+const args = process.argv.slice(2);
+if (args.includes("--help") || args.includes("-h")) {
+  printHelp();
+  process.exit(0);
+}
+if (args.includes("--live") && args.includes("--dry")) {
+  process.stderr.write("citizen-refill: pass only one of --dry / --live, not both\n");
+  process.exit(2);
+}
+const live = args.includes("--live");
+
+try {
+  const env = process.env;
+  const rpcUrl = env.NOSANA_RPC_URL || env.SOLANA_RPC_URL || DEFAULT_RPC_URL;
+  const baseRpcUrl = env.BASE_RPC_URL || BASE_RPC_URL_DEFAULT;
+
+  const solSecret = resolveSolanaSecret({ env });
+  if (!solSecret) {
+    throw new Error("citizen-refill: no Solana secret resolved for this instance — ANICCA_HOME must point at a funded home");
+  }
+  const { address: solAddress } = deriveAddressFromSecret(solSecret);
+
+  const baseAddress = resolveEvmAddress({ env });
+  if (!baseAddress) {
+    throw new Error("citizen-refill: no Base address resolved (wallet.json is missing an `address` field) — cannot read revenue balance");
+  }
+
+  log(`solana ${solAddress}`);
+  log(`base   ${baseAddress}`);
+
+  const [{ solBalance, nosBalance }, baseUsdc] = await Promise.all([
+    readSolanaBalances({ address: solAddress, rpcUrl }),
+    readBaseUsdcBalance({ address: baseAddress, rpcUrl: baseRpcUrl }),
+  ]);
+  log(`balances: ${nosBalance} NOS, ${solBalance} SOL (Solana), ${baseUsdc} USDC (Base)`);
+
+  const plan = planRefill({ nosBalance, solBalance, baseUsdc });
+  log(`plan: act=${plan.act} bridgeUsd=${(plan.bridgeUsd || 0).toFixed(4)} needNos=${!!plan.needNos} needSol=${!!plan.needSol}`);
+  log(`reason: ${plan.reason}`);
+
+  if (!live) {
+    log("(dry) stopping before any transfer — pass --live to execute.");
+    process.exit(0);
+  }
+
+  const stateDir = resolveStateDir({ env });
+  const ledgerFile = path.join(stateDir, REFILL_LEDGER_BASENAME);
+  const nowTs = Date.now() / 1000;
+  const intentId = `${Math.floor(nowTs)}-refill`;
+  appendChild(ledgerFile, { ts: nowTs, intentId, status: "intent", solAddress, baseAddress, nosBalance, solBalance, baseUsdc, plan });
+
+  if (!plan.act) {
+    appendChild(ledgerFile, { ts: Date.now() / 1000, intentId, status: "settled", executed: false, reason: plan.reason });
+    process.exit(0);
+  }
+
+  const result = await executeRefill({
+    plan,
+    bridge: (usd) => bridgeBaseUsdcToSolanaSol({ amountUsd: usd, solanaRecipient: solAddress, env }),
+    swapToNos: () => acquireNos({ env, live: true }),
+  });
+  appendChild(ledgerFile, {
+    ts: Date.now() / 1000,
+    intentId,
+    status: "settled",
+    executed: true,
+    ok: result.ok,
+    reason: result.reason || null,
+    bridgeTx: result.bridge && result.bridge.tx ? result.bridge.tx : null,
+    swapSignature: result.swap && result.swap.signature ? result.swap.signature : null,
+  });
+  log(`executeRefill: ok=${result.ok}${result.reason ? ` — ${result.reason}` : ""}`);
+  process.exit(result.ok ? 0 : 1);
+} catch (err) {
+  // Every throw site above (this file, resolve-identity.mjs, keypair.mjs, refill.mjs) is
+  // constructed to never include secret material — safe to print verbatim.
+  process.stderr.write(`citizen-refill: ${(err && err.message) || err}\n`);
+  process.exit(1);
+}

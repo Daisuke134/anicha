@@ -111,3 +111,49 @@ export function planRefill({
     reason: `bridging $${bridgeUsd.toFixed(2)} from Base to refill ${what} while keeping $${keepOnBaseUsd} working capital on Base`,
   };
 }
+
+/**
+ * Carry out a decided plan: bridge Base USDC to Solana, then (only if NOS is what was short) swap
+ * the landed SOL into NOS. Every rail is injected — this function never touches the network
+ * itself; bin/citizen-refill supplies the real bridge (relay.link, mirroring
+ * bridge-base-to-solana.mjs) and the real swap (acquire-nos.mjs's acquireNos).
+ *
+ * The bridge leg lands as NATIVE SOL on Solana, not a token (see DEFAULT_MIN_SOL_RESERVE's doc
+ * comment) — so a SOL-only shortfall is already satisfied the moment the bridge confirms, and
+ * swapToNos only needs to run when NOS itself was short. It runs at most once per pass, and never
+ * runs at all when the bridge did not confirm: money that never arrived cannot be spent, so
+ * treating a failed bridge as "try the swap anyway" would be spending funds that do not exist.
+ */
+export async function executeRefill({ plan, bridge, swapToNos }) {
+  if (!plan || plan.act !== true) {
+    return { ok: true, skipped: true, reason: (plan && plan.reason) || "no plan to act on" };
+  }
+
+  const bridgeResult = await bridge(plan.bridgeUsd);
+  if (!bridgeResult || bridgeResult.ok !== true) {
+    return {
+      ok: false,
+      skipped: false,
+      reason: `bridge failed: ${(bridgeResult && bridgeResult.reason) || "unknown"}`,
+      bridge: bridgeResult,
+      swap: null,
+    };
+  }
+
+  if (!plan.needNos) {
+    return { ok: true, skipped: false, bridge: bridgeResult, swap: null };
+  }
+
+  const swapResult = await swapToNos();
+  if (!swapResult || swapResult.ok !== true) {
+    return {
+      ok: false,
+      skipped: false,
+      reason: `swap failed: ${(swapResult && swapResult.reason) || "unknown"}`,
+      bridge: bridgeResult,
+      swap: swapResult,
+    };
+  }
+
+  return { ok: true, skipped: false, bridge: bridgeResult, swap: swapResult };
+}

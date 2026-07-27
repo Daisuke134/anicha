@@ -43,3 +43,34 @@ test("a plan states its reason whether it acts or not", () => {
     assert.ok(p.reason.length > 0);
   }
 });
+
+test("executeRefill bridges, then swaps, and reports each leg it actually did", async () => {
+  const { executeRefill } = await import("../refill.mjs");
+  const calls = [];
+  const r = await executeRefill({
+    plan: { act: true, bridgeUsd: 5, needNos: true, needSol: true, reason: "short" },
+    bridge: async (usd) => { calls.push(["bridge", usd]); return { ok: true, tx: "0xbridge" }; },
+    swapToNos: async () => { calls.push(["swap"]); return { ok: true, tx: "solswap" }; },
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(calls.map((c) => c[0]), ["bridge", "swap"]);
+});
+
+test("executeRefill does not swap when the bridge failed — money that never arrived cannot be spent", async () => {
+  const { executeRefill } = await import("../refill.mjs");
+  let swapped = false;
+  const r = await executeRefill({
+    plan: { act: true, bridgeUsd: 5, needNos: true, reason: "short" },
+    bridge: async () => ({ ok: false, reason: "relay refused" }),
+    swapToNos: async () => { swapped = true; return { ok: true }; },
+  });
+  assert.equal(r.ok, false);
+  assert.equal(swapped, false);
+});
+
+test("executeRefill is a no-op for a plan that decided not to act", async () => {
+  const { executeRefill } = await import("../refill.mjs");
+  const r = await executeRefill({ plan: { act: false, reason: "stocked" }, bridge: async () => { throw new Error("must not run"); } });
+  assert.equal(r.ok, true);
+  assert.equal(r.skipped, true);
+});
