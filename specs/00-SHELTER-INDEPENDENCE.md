@@ -179,6 +179,28 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | openapi.json の必須形 | `openapi`/`info.title`/`info.version`/`paths` + 該当 path の `x-payment-info.price = {mode:"fixed", amount, currency}` |
 | CDP Bazaar は settlement-driven | 初回決済後に index される。read API は `GET https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources`（無認証） |
 
+### 2軒目（Modal gateway）の硬い制約 — 大家は互換ではない（2026-07-27 実測）
+
+**`Only managed image python:3.11 is currently available.`** node:20 も nginx:alpine も 400 で拒否。つまり:
+
+| | 1軒目 Nosana | 2軒目 Modal gateway |
+|---|---|---|
+| image | 任意のコンテナ | **python:3.11 のみ** |
+| 公開 URL | あり（`getExposeIdHash` で導出） | なし（gateway 経由の exec のみ） |
+| Franklin(npm) が動くか | ✅ | ❌ **node が無い** |
+
+**冗長化の主張は、これまで書いていたより弱い。** 「大家が2社ある」は本当だが「同じものが両方で動く」は偽。2軒目で生き延びるには Python 版の最小生存機能（heartbeat 署名 + 決算書 + x402 決済）が要る。x402 の python SDK v2 には EVM の exact scheme が同梱されておらず（`x402.clients` は存在せず、`x402[evm]` を入れても `x402_evm` は生えない）、手で EIP-3009 を組む必要がある。**S20b として残す。**
+
+### 金を動かす loop で踏んだ2つ（live でしか出なかった・2026-07-27）
+
+どちらも**テストは緑のまま**で、実行して初めて出た。
+
+**① cap は「入れる量」の上限であって「持っている量」の上限ではない。** funding gate が全 asset の cap を無条件に検査していたため、sub-wallet の SOL が cap 超過（0.026 > 0.005）なだけで **NOS の補給が丸ごと拒否**された。しかもその SOL は誰かが送ったのではなく **Nosana の escrow 返金で戻ってきたもの**。NOS を拒否しても SOL のエクスポージャは1 lamport も減らない。→ cap は**補給する asset だけ**に適用し、既存の超過は warning として表に出す（黙って他を止めない）。
+
+**② 金が動いた後に結果の形が読めないなら、「失敗」と報告してはいけない。** `fundSubWallet` は `sent` を返し、`executeRefill` は `ok` を読んでいた。**tx `aYGEcC5k…` が 0.473 NOS を実際に送った直後に loop は `top-up failed: unknown` と報告**した。これを読んだ retry loop は二重送金する。→ rail 側は `ok` を明示、呼び出し側は両方を読み、**どちらも無い場合は failure ではなく `indeterminate`**（「送金は成立した可能性がある。チェーンを見てから再送しろ」）。
+
+**一般法則: 金を動かす関数の成功フィールドは推測させてはいけない。推測が外れた時の既定値が「失敗」だと、その既定値が二重支払いを生む。**
+
 ### 運用一般
 
 **★ 時間の天井は金の床の代わりにならない（2026-07-27 実測）★**: renewer は「1回 +600秒・1 lease は 6時間まで」という**時間**の制限だけを持っていた。結果 job `AzUFmVa5` は 600→**19800秒**（5.5時間）まで自分で延長し続け、shelter wallet を **0.894 → 0.027 NOS** まで焼いた（≈$0.23）。残 0.027 NOS では次の10分 lease（0.0302 NOS）すら買えない = **agent は自分の家賃で自分をホームレスにした**。SOL はむしろ増えた（0.0143→0.0235、escrow 返金）ので「SOL があるから大丈夫」は誤読。**一般法則: 自動的に金を使う loop には、上限（1回いくらまで）と別に床（残高がここを割ったら止める）を必ず置く。上限だけでは残高ゼロに向かって正常動作し続ける。** 反例として床が要らないのは、支出が1回きりで再入場しない loop だけ。
@@ -205,8 +227,8 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | 順 | ID | やること | なぜこの順か |
 |---|---|---|---|
 | ~~1~~ | S18 | **renewer に金の床**（残高が fee floor を割ったら延長を止め、家を明け渡す） | 実測: job `AzUFmVa5` が 600→**19800秒**まで自己延長し、shelter wallet を 0.894→**0.027 NOS** まで焼いた。時間の天井はあるが金の床が無い。**これを入れる前に入金すると穴の空いたバケツになる**ので、入金判断より先 | ✅ **完了 2026-07-27**。床の値付けが設計の核: **床 = 引っ越し代**（新規 confidential post の escrow 0.34 NOS）。最後の1枚まで延長に使う agent は次の手が無いが、早く止まる agent はまだ引っ越せる。**止まるのは生き残れるが、枯れるのは生き残れない**。実装2箇所（`renew.mjs` の純関数 + container 内 inline renewer。財布を焼いたのは後者なので両方必須）。140/140 tests、うち①live drain の再現テスト（0.894 NOS で回すと 19800秒に届く前に reserve を残して停止）②boot script の順序テスト（残高チェックが `jobs.extend` の**前**にあること — 支出の後に置いた床は床ではない）。**実残高で検証: 0.026681 NOS → `renew=false`「paying for this extension would spend the 0.34 NOS kept to move house」**
-| 2 | S19 | 収入 USDC → bridge → NOS/SOL の自動補給 | 1 と対。1 が「金が尽きたら死ぬ」を安全にし、2 が「稼いだら生き返る」を繋ぐ。この2本で初めて自活が loop になる | 🔄 **executor 走行中 2026-07-27**（worktree `.worktrees/s19-refill`、plan `docs/superpowers/plans/2026-07-27-s19-refill-loop.md`）。設計: 純関数 `planRefill`（いくら動かすか）+ `executeRefill`（rail を注入）+ `bin/citizen-refill`（既定は plan 表示のみ、`--live` で実行）。**S18 との対**: S18 は「尽きかけたら安全に止まる」を作ったが、止まった agent を**戻す**手段が無かった。S19 がそれ。閾値の意図: `KEEP_ON_BASE_USD=1.00`（Base は推論と Modal の家を買い続ける必要があるので全額は渡さない — 片方の飢えを別の飢えと交換しない）、`MIN_BRIDGE_USD=0.50`（これ未満は bridge 手数料に食われる）、`MAX_PASS_USD=25`（1回の悪い quote で全額動かさない）。既存を再実装しない: swap は `funding/acquire-nos.mjs`（Jupiter）、bridge は rtdash の `bridge-base-to-solana.mjs`（relay.link）を読んで移植
-| 3 | S20 | 2軒目へ引っ越す（買ったが住んでいない） | 家を買える証明は済んだ。**住める**証明がまだ無い。冗長化はここで初めて本物になる | ⏳ **次に着手**。`buy-house.mjs` が返す sandbox は起動するが誰も住んでいない。done 条件 = 2軒目の中から Franklin が応答し、外部 URL で確認できること
+| ~~2~~ | S19 | 収入 → bridge → swap → **sub-wallet top-up** の自動補給 | ✅ **完了 2026-07-27**。main merge 済み（167 tests）。**live 実行で shelter wallet 0.0267 → 0.5 NOS（cap ちょうど）、treasury 0.607 → 0.134、tx `aYGEcC5k…` finalized**。設計で効いた判断: 既に正しいチェーンに金がある時は **bridge も swap もしない**（手数料の丸損）。実行して初めて出た欠陥2件は下記
+| 🔄 3 | S20 | 2軒目へ**引っ越す** | 🔄 **半分完了 2026-07-27**。✅ 入居実証: sandbox `sb-f1BnTvx1NhWSnJSPXQ6VBR` の中から実出力 `3.11.12 modal`（`skills/self/shelter/move-in.mjs`、149→167 tests）。判定は「API が running と言った」ではなく**中のプロセスにしか出せない出力があること**（exec が ok でも stdout 空なら「住めていない」と言う）。❌ **残: 2軒目で生存できない** — 下記の硬い制約
 | 4 | S21 | bootstrap を Modal へ（Mac の関与を「投資」だけにする） | 今も1軒目の点火は Mac。これを外すと人間の残存関与が資金だけになる | ⏳ 待機。**S13 の制約が効く**: confidential post は poster プロセスが claim+delivery まで生存必須。だから「Mac を外す」= poster を Modal box 上で走らせる、が具体的な形。S20 が先（住める箱がないと poster を置く場所が無い）
 | 5 | D群 | Life Manager 設計（custody / dashboard / cap UI / 法務） | 上の4つが揃って初めて「Franklin 群を管理する」対象が実在する |
 | 6 | F群 | 記事 EN 更新 → JP | 数字が出揃ってから書く。ただし**待ちの間に書ける部分（仕組み・検証手順）は先に書いておく** |
