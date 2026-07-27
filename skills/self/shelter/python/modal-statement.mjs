@@ -2,6 +2,8 @@
 // independently compare the public page with the chains/APIs it claims to summarize.
 
 import fs from "node:fs";
+import { resolve4 } from "node:dns/promises";
+import { request as httpsRequest } from "node:https";
 import { fileURLToPath } from "node:url";
 
 import { resolveEvmPrivateKey } from "../../../earn/lib/resolve-identity.mjs";
@@ -311,18 +313,82 @@ async function fetchIndependentFinancialSnapshot(publicFetch, statement) {
 }
 
 
-async function fetchPublicRoute(publicFetch, origin, path, expectedContentType) {
-  const response = await publicFetch(`${origin}${path}`);
-  const text = await response.text();
-  const contentType = response.headers?.get?.("content-type") || "";
-  if (!response.ok || !contentType.toLowerCase().startsWith(expectedContentType)) {
-    throw new Error(`${path} failed public fetch: HTTP ${response.status} ${contentType}`);
-  }
-  return { status: response.status, text, contentType };
+function requestTunnelIp({ ip, hostname, path }) {
+  return new Promise((resolve, reject) => {
+    const request = httpsRequest({
+      protocol: "https:",
+      hostname: ip,
+      port: 443,
+      path,
+      method: "GET",
+      servername: hostname,
+      headers: {
+        host: hostname,
+        accept: "*/*",
+      },
+    }, (response) => {
+      const chunks = [];
+      let length = 0;
+      response.on("data", (chunk) => {
+        length += chunk.length;
+        if (length > 2_000_000) {
+          request.destroy(new Error(`${path} exceeded the 2 MB response limit`));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on("end", () => {
+        resolve({
+          status: response.statusCode || 0,
+          text: Buffer.concat(chunks).toString("utf8"),
+          contentType: String(response.headers["content-type"] || ""),
+        });
+      });
+    });
+    request.setTimeout(15_000, () => request.destroy(new Error(`${path} timed out`)));
+    request.on("error", reject);
+    request.end();
+  });
 }
 
 
-export async function proveModalStatement({ baseKey, fetchImpl, publicFetch = fetch } = {}) {
+export async function fetchTunnelRouteDirect(
+  origin,
+  path,
+  expectedContentType,
+  { resolve4Impl = resolve4, requestIpImpl = requestTunnelIp } = {},
+) {
+  const validatedOrigin = validateTunnelUrl(origin);
+  const hostname = new URL(validatedOrigin).hostname;
+  const addresses = [...new Set(await resolve4Impl(hostname))].sort();
+  if (addresses.length === 0) throw new Error(`no IPv4 address resolved for ${hostname}`);
+
+  let lastError;
+  for (const ip of addresses) {
+    try {
+      const route = await requestIpImpl({ ip, hostname, path });
+      if (
+        route.status < 200
+        || route.status >= 300
+        || !route.contentType.toLowerCase().startsWith(expectedContentType)
+      ) {
+        throw new Error(`${path} failed public fetch: HTTP ${route.status} ${route.contentType}`);
+      }
+      return route;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error(`${path} failed public fetch`);
+}
+
+
+export async function proveModalStatement({
+  baseKey,
+  fetchImpl,
+  publicFetch = fetch,
+  tunnelRouteFetch = fetchTunnelRouteDirect,
+} = {}) {
   const command = buildStatementCommand();
   const habitation = await moveIn({
     baseKey,
@@ -363,9 +429,9 @@ export async function proveModalStatement({ baseKey, fetchImpl, publicFetch = fe
 
   try {
     const [htmlRoute, jsonRoute, heartbeatRoute] = await Promise.all([
-      fetchPublicRoute(publicFetch, control.url, "/", "text/html"),
-      fetchPublicRoute(publicFetch, control.url, "/statement.json", "application/json"),
-      fetchPublicRoute(publicFetch, control.url, "/heartbeats", "application/x-ndjson"),
+      tunnelRouteFetch(control.url, "/", "text/html"),
+      tunnelRouteFetch(control.url, "/statement.json", "application/json"),
+      tunnelRouteFetch(control.url, "/heartbeats", "application/x-ndjson"),
     ]);
     if (!htmlRoute.text.includes("$0.00 from outside") || !htmlRoute.text.includes(sandboxId)) {
       throw new Error("public HTML omits the zero-revenue truth or sandbox identity");

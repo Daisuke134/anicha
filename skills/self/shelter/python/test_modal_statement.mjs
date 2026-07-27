@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildStatementCommand,
   compareFinancialSnapshots,
+  fetchTunnelRouteDirect,
   parseStatementControl,
   proveModalStatement,
   validatePublicStatement,
@@ -187,6 +188,37 @@ test("financial comparison is exact except for one cent of live Polymarket drift
 });
 
 
+test("tunnel fetch bypasses a stale system DNS cache while preserving TLS hostname", async () => {
+  const calls = [];
+  const route = await fetchTunnelRouteDirect(
+    PUBLIC_URL,
+    "/statement.json",
+    "application/json",
+    {
+      resolve4Impl: async (hostname) => {
+        assert.equal(hostname, "spring-river-123.trycloudflare.com");
+        return ["104.16.231.132", "104.16.230.132"];
+      },
+      requestIpImpl: async (options) => {
+        calls.push(options);
+        return {
+          status: 200,
+          text: JSON.stringify(STATEMENT),
+          contentType: "application/json; charset=utf-8",
+        };
+      },
+    },
+  );
+
+  assert.equal(route.status, 200);
+  assert.deepEqual(calls, [{
+    ip: "104.16.230.132",
+    hostname: "spring-river-123.trycloudflare.com",
+    path: "/statement.json",
+  }]);
+});
+
+
 test("paid proof fetches three live routes and independently re-reads every rail", async () => {
   const paidResponses = [
     response({ sandbox_id: SANDBOX_ID, status: "running" }),
@@ -256,6 +288,13 @@ test("paid proof fetches three live routes and independently re-reads every rail
     baseKey: `0x${"11".repeat(32)}`,
     fetchImpl: paidFetch,
     publicFetch,
+    tunnelRouteFetch: async (origin, path, expectedContentType) => {
+      const publicResponse = await publicFetch(`${origin}${path}`);
+      const text = await publicResponse.text();
+      const contentType = publicResponse.headers.get("content-type") || "";
+      assert.equal(contentType.startsWith(expectedContentType), true);
+      return { status: publicResponse.status, text, contentType };
+    },
   });
 
   assert.equal(result.ok, true);
