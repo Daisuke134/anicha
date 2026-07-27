@@ -102,3 +102,28 @@ test("funding gate: USDC-only request is a valid request", () => {
   const verdict = evaluateFundingGate({ ...BASE, requestNos: 0, requestSol: 0, requestUsdc: 0.01, ownerUsdcBalance: 0.03 });
   assert.equal(verdict.allowed, true, verdict.reason);
 });
+
+test("an over-cap balance in one asset does not block funding a different asset", () => {
+  // Live 2026-07-27: the sub-wallet held 0.026 SOL against a 0.005 cap because Nosana escrow
+  // refunds paid it back. That froze a NOS-only top-up and left the agent unable to rent.
+  const gate = evaluateFundingGate({
+    requestNos: 0.47,
+    subNosBalance: 0.0267,
+    subSolBalance: 0.0261,
+    ownerNosBalance: 0.607,
+    ownerSolBalance: 0.0079,
+  });
+  assert.equal(gate.allowed, true);
+  assert.match(gate.warning, /SOL/);
+});
+
+test("the cap still bites for the asset actually being funded", () => {
+  const gate = evaluateFundingGate({
+    requestSol: 0.5,
+    subSolBalance: 0,
+    ownerNosBalance: 10,
+    ownerSolBalance: 10,
+  });
+  assert.equal(gate.allowed, false);
+  assert.match(gate.reason, /SOL cap/);
+});

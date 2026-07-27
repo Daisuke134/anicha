@@ -74,19 +74,25 @@ export function evaluateFundingGate({
   const sol = isPositiveFinite(requestSol) ? requestSol : 0;
   const usdc = isPositiveFinite(requestUsdc) ? requestUsdc : 0;
 
-  if (subNosBalance + nos > nosCap) {
+  // A cap limits what we PUT IN. Checking a balance we are not adding to turns an unrelated
+  // over-cap holding into a permanent freeze on every other asset — measured 2026-07-27: the
+  // sub-wallet sat at 0.026 SOL against a 0.005 cap purely from Nosana escrow REFUNDS (nobody sent
+  // it), and that blocked a NOS-only top-up, leaving the agent unable to pay rent while the SOL it
+  // was being punished for sat there doing nothing. Refusing the NOS did not reduce the SOL
+  // exposure by one lamport. So each cap is checked only for the asset actually being funded.
+  if (nos > 0 && subNosBalance + nos > nosCap) {
     return {
       allowed: false,
       reason: `sub-wallet would hold ${(subNosBalance + nos).toFixed(6)} NOS, exceeding the NOS cap ${nosCap} — the cap IS the security boundary, refusing`,
     };
   }
-  if (subSolBalance + sol > solCap) {
+  if (sol > 0 && subSolBalance + sol > solCap) {
     return {
       allowed: false,
       reason: `sub-wallet would hold ${(subSolBalance + sol).toFixed(6)} SOL, exceeding the SOL cap ${solCap} — refusing`,
     };
   }
-  if (subUsdcBalance + usdc > usdcCap) {
+  if (usdc > 0 && subUsdcBalance + usdc > usdcCap) {
     return {
       allowed: false,
       reason: `sub-wallet would hold ${(subUsdcBalance + usdc).toFixed(6)} USDC, exceeding the USDC cap ${usdcCap} — refusing`,
@@ -104,7 +110,20 @@ export function evaluateFundingGate({
       reason: `owner SOL would drop to ${(ownerSolBalance - sol).toFixed(6)}, below the fee floor ${solFloor}`,
     };
   }
-  return { allowed: true, reason: "within sub-wallet caps and owner floors", nos, sol, usdc };
+  // An asset can sit over its cap without this transfer causing it (refunds do this). Say so —
+  // allowing the funding is right, hiding the breach is not.
+  const overCap = [];
+  if (subNosBalance > nosCap) overCap.push(`NOS ${subNosBalance.toFixed(6)} > ${nosCap}`);
+  if (subSolBalance > solCap) overCap.push(`SOL ${subSolBalance.toFixed(6)} > ${solCap}`);
+  if (subUsdcBalance > usdcCap) overCap.push(`USDC ${subUsdcBalance.toFixed(6)} > ${usdcCap}`);
+  return {
+    allowed: true,
+    reason: "within sub-wallet caps and owner floors",
+    nos,
+    sol,
+    usdc,
+    ...(overCap.length ? { warning: `already over cap, not caused by this transfer: ${overCap.join("; ")}` } : {}),
+  };
 }
 
 /**
@@ -237,7 +256,10 @@ export async function fundSubWallet({
   });
   log(`funding gate: ${gate.allowed ? "ALLOWED" : "REFUSED"} — ${gate.reason}`);
 
-  const result = { owner: owner.publicKey.toBase58(), sub: sub.address, gate, sent: false, signatures: {} };
+  // `ok` mirrors `sent` so a caller reading the common field cannot mistake a completed transfer
+  // for a failure. A money rail whose success field is unguessable is a double-spend waiting for a
+  // retry loop — measured 2026-07-27: tx aYGEcC5k moved 0.473 NOS and the caller reported "failed".
+  const result = { owner: owner.publicKey.toBase58(), sub: sub.address, gate, sent: false, ok: false, signatures: {} };
   if (!gate.allowed) return result;
   if (!live) {
     log(`(dry) would send ${gate.sol} SOL + ${gate.nos} NOS + ${gate.usdc} USDC to ${sub.address}. Stopping before any transfer.`);
@@ -282,5 +304,6 @@ export async function fundSubWallet({
 
   append({ kind: "subwallet-funding", status: "settled", ts: now() / 1000, from: result.owner, to: sub.address, nos: gate.nos, sol: gate.sol, usdc: gate.usdc, signatures: result.signatures });
   result.sent = true;
+  result.ok = true;
   return result;
 }

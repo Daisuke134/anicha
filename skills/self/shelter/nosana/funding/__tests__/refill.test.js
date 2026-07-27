@@ -171,3 +171,38 @@ test("executeRefill goes straight to top-up when the treasury already covers the
   assert.equal(r.ok, true);
   assert.deepEqual(calls.map((c) => c[0]), ["topup"]);
 });
+
+test("executeRefill accepts a rail that reports success as `sent` rather than `ok`", async () => {
+  // Live 2026-07-27: fundSubWallet returns {sent:true,...}. Reading only `ok` reported a completed
+  // 0.473 NOS transfer (tx aYGEcC5k) as a failure.
+  const { executeRefill } = await import("../refill.mjs");
+  const r = await executeRefill({
+    plan: { act: true, bridgeUsd: 0, swapNeeded: false, topUpNos: 0.47, topUpSol: 0, reason: "short" },
+    topUpSubWallet: async () => ({ sent: true, signatures: { nos: "sig" } }),
+  });
+  assert.equal(r.ok, true);
+});
+
+test("an unreadable top-up result is indeterminate, never a plain failure", async () => {
+  // The dangerous case: money may already have moved. Reporting "failed" invites a retry that
+  // sends it twice.
+  const { executeRefill } = await import("../refill.mjs");
+  const r = await executeRefill({
+    plan: { act: true, bridgeUsd: 0, swapNeeded: false, topUpNos: 0.47, topUpSol: 0, reason: "short" },
+    topUpSubWallet: async () => ({ something: "unexpected" }),
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.indeterminate, true);
+  assert.match(r.reason, /MAY have gone through/);
+});
+
+test("a genuine refusal still reports the gate's reason, not 'unknown'", async () => {
+  const { executeRefill } = await import("../refill.mjs");
+  const r = await executeRefill({
+    plan: { act: true, bridgeUsd: 0, swapNeeded: false, topUpNos: 0.47, topUpSol: 0, reason: "short" },
+    topUpSubWallet: async () => ({ sent: false, ok: false, gate: { allowed: false, reason: "over the NOS cap" } }),
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.indeterminate, false);
+  assert.match(r.reason, /over the NOS cap/);
+});

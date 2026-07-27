@@ -222,11 +222,21 @@ export async function executeRefill({ plan, bridge, swapToNos, topUpSubWallet })
   let topUpResult = null;
   if (plan.topUpNos > 0 || plan.topUpSol > 0) {
     topUpResult = await topUpSubWallet({ nos: plan.topUpNos, sol: plan.topUpSol });
-    if (!topUpResult || topUpResult.ok !== true) {
+    // Rails report success under different names. Read both, and treat "neither field is present"
+    // as INDETERMINATE rather than as failure: this call may already have moved money, and a
+    // caller told "failed" will retry and send it twice. Measured 2026-07-27 — tx aYGEcC5k landed
+    // 0.473 NOS on-chain while this branch reported `top-up failed: unknown`, because the rail
+    // returns `sent` and this read `ok`.
+    const moved = topUpResult && (topUpResult.ok ?? topUpResult.sent);
+    if (moved !== true) {
+      const indeterminate = Boolean(topUpResult) && topUpResult.ok === undefined && topUpResult.sent === undefined;
       return {
         ok: false,
+        indeterminate,
         skipped: false,
-        reason: `top-up failed: ${(topUpResult && topUpResult.reason) || "unknown"}`,
+        reason: indeterminate
+          ? "top-up result is unreadable — the transfer MAY have gone through. Check the chain before retrying; do not re-send blind."
+          : `top-up refused: ${(topUpResult && (topUpResult.reason || (topUpResult.gate && topUpResult.gate.reason))) || "no reason given"}`,
         bridge: bridgeResult,
         swap: swapResult,
         topUp: topUpResult,
