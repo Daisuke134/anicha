@@ -252,6 +252,46 @@ repo `/Users/anicca/Projects/life-manager` を実際に読んだ結果、この�
 | 3 | D群 | Life Manager 設計（custody / dashboard / cap UI / 法務） | 上が揃って初めて「管理する対象」が実在する |
 | 4 | F群 | 記事 EN 更新 → JP | 数字待ちだが、**仕組みと検証手順は今書ける**。冗長化の記述は S20b の結果で書き換えが要る（現状の主張は実測より強い） |
 
+### 1〜4 の「どうやるか」— 調査完了（2026-07-27、全部一次ソース読み）
+
+#### S20b: 2軒目で生き延びる
+
+| 要件 | 状態 | どうやるか |
+|---|---|---|
+| **x402 決済** | ✅ **完了・実測済み** | `skills/self/shelter/python/x402_pay.py`。`eth_account` + `requests` のみ。**実 tx `0x315fe61b…`、Base block 49161947、receipt status 0x1**。13 tests。黙って失敗する定数3つ: header は v2 で `PAYMENT-SIGNATURE`（v1 の `X-PAYMENT` を送ると **402 が返るだけで原因が見えない**）／amount は base unit なので**変換したら署名は有効なまま違う額を払う**／署名の `0x` は `HexBytes.hex()` が付けない |
+| heartbeat 署名 | ⏳ 残 | ed25519。`PyNaCl` か `solders.Keypair.sign_message`。JS 版と同じ canonical JSON を署名すれば検証器を共用できる |
+| 決算書 serve | ⏳ 残 | `http.server` で足りる。`statement.mjs` の allowlist 設計をそのまま移植（**blacklist にしない** — Solana の署名と秘密鍵は base58 87-88字で形が同じ） |
+
+#### S21: Mac を外す — **判定 FEASIBLE-WITH-EFFORT**
+
+Python から Nosana に job を post する経路を一次ソースで確認した。
+
+| 部品 | 実態 | 出典 |
+|---|---|---|
+| Python SDK | **存在しない**。`nosana-ci/nosana-python-sdk` は **size 0 の空 repo**（README 0 バイト）。PyPI にも無し | `gh api repos/nosana-ci/nosana-python-sdk` |
+| `anchorpy` で IDL を読む | **不可**。`anchorpy-core` の IDL parser は 2023-12 で止まっており、Anchor 0.30.0(2024-04) の IDL 仕様変更に未追従。Nosana は **Anchor 1.0.2** でビルド。該当 issue が未解決で複数（#147/#163/#167/#149） | `Anchor.toml`、anchorpy の open issues |
+| 迂回策 | **命令を手で組む**。Anchor の discriminator は仕様不変で `sha256("global:list")[:8]`。program ID `nosJhNRqr2bc9g1nfGDcXXTXvYUmxD4cVwy2pMWhrYM`、`list(ipfs_job:[u8;32], timeout:i64)`、必要 account 一覧と PDA 導出は公開ソースに全部ある。`solders`/`solana-py` は現役 | `nosana-programs/programs/nosana-jobs/src/instructions/list.rs`、Anchor `lang/syn/src/codegen/program/common.rs:11-17` |
+| REST の write 経路 | **使えない**。`POST /jobs/list` は存在するが SDK が送信前に `API key is required` で throw。Nosana の有償 Deployments 向け | `@nosana/sdk` `dist/client/index.js:15-16` |
+| IPFS pin 先 | **Pinata**（`api.pinata.cloud/pinning/pinJSONToIPFS`）。`requests` 1発。**⚠ SDK には Nosana 所有の JWT が平文で同梱されている** | `dist/services/ipfs.js:52-74`、`dist/config.js` |
+| confidential 配送 | poster が node の `/job/{id}/job-definition` に**5秒ごとに再送**。認証は「IPFS hash の生バイトを ed25519 署名して `<msg>:<base58(sig)>:<epoch_ms>`」 | `nosana-cli` `postJobDefinitionUntilSuccess`、`dist/services/authorization.js:10-46` |
+
+**非自明な唯一の難所 = PDA 導出と命令の手詰め。** それ以外は `requests` と ed25519 署名だけ。
+
+**★ 判断: 他人の埋め込み JWT に依存しない ★** SDK 同梱の Pinata JWT を使えば動くが、それは Nosana の資格情報であって我々のものではない。回されたら止まるし、規模を出す使い方でもない。**自分の Pinata キーを取る**（無料枠）。これは「動くか」ではなく「誰の許可の上に立つか」の問題で、このプロジェクト全体の主題そのもの。
+
+#### D群: Life Manager — **merge ではなく新規**（前節の実測どおり）
+接続点は `adapters/transport.{js,py}` のみ。他は全部ゼロから。**生きている Franklin が1体もいない状態で管理画面を作るのは、管理対象のない管理者を作ること**なので S20b/S21 の後で正しい。
+
+#### F群: 記事 — 冗長化の記述が実測より強い
+
+07-27 EN 版に書き換えが要る箇所が **9行**。特に自分で制約を書いてしまっている1行:
+> "One HTTP POST with a Base key, and the response is a running **Python 3.11** box."
+
+そして実測と矛盾する1行:
+> "That asymmetry is why an agent that can use both rails is stronger than one that has mastered either."
+
+**Node の agent は2軒目で動かない**（`Only managed image python:3.11 is currently available.`）。「大家が2社ある」は真、「同じものが両方で動く」は偽。**S20b 完了後に書けば真になる** — だから記事は S20b の後。JP 版は 07-27 分が未着手。
+
 ### 実装の回し方（Dais 裁定 2026-07-27）
 
 **実装は executor subagent に出す。orchestrator は spec 管理と E2E 検証に専念する。** 理由は context — 実装の生ツール出力を orchestrator の窓に流し込むと、順序の正本（この spec）を保つ余力が先に尽きる。手順は flow A hybrid: spec/plan を書く → `.worktrees/<id>/` を切る → executor が TDD で実装 → orchestrator が実チェーン/実コマンドで検証 → merge → worktree 削除。**executor には `--live` を絶対に渡させない**（実際に金が動く操作は orchestrator が自分で撃って自分で検証する）。
