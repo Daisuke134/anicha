@@ -96,7 +96,7 @@ Also assert:
 Run:
 
 ```bash
-.venv/bin/python -m unittest skills/self/shelter/python/test_statement.py
+.venv/bin/python -m unittest discover -s skills/self/shelter/python -p 'test_statement.py'
 ```
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'statement'`.
@@ -141,7 +141,7 @@ Build the statement from internally created values only. Render with `html.escap
 Run:
 
 ```bash
-.venv/bin/python -m unittest skills/self/shelter/python/test_statement.py
+.venv/bin/python -m unittest discover -s skills/self/shelter/python -p 'test_statement.py'
 .venv/bin/python -m unittest discover -s skills/self/shelter/python -p 'test_*.py'
 ```
 
@@ -197,7 +197,7 @@ With injected `popen`, `read_text`, and `sleep`, assert the launcher:
 Run:
 
 ```bash
-.venv/bin/python -m unittest skills/self/shelter/python/test_statement.py
+.venv/bin/python -m unittest discover -s skills/self/shelter/python -p 'test_statement.py'
 ```
 
 Expected: FAIL because `make_statement_handler` and `launch_public_statement` do not exist.
@@ -225,7 +225,7 @@ The CLI requires `MODAL_SANDBOX_ID`; it accepts only public address arguments an
 Run:
 
 ```bash
-.venv/bin/python -m unittest skills/self/shelter/python/test_statement.py
+.venv/bin/python -m unittest discover -s skills/self/shelter/python -p 'test_statement.py'
 .venv/bin/python -m unittest discover -s skills/self/shelter/python -p 'test_*.py'
 ```
 
