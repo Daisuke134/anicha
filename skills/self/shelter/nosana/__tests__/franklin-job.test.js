@@ -109,3 +109,17 @@ test("the container renewer checks money before extending, not only the clock", 
   assert.match(script, /RES=0\.34/);
   assert.match(script, /nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7/);
 });
+
+test("the container signs the same heartbeat the project's own verifier accepts", () => {
+  // The container used to emit {kind:"heartbeat", cycle, slot, blockhash, sig, pubkey}, which
+  // verifyHeartbeatEntry rejects outright. Evidence that only an ad-hoc checker can read is
+  // evidence a process wrote about itself — the exact thing heartbeats exist to rule out.
+  const script = buildFranklinBootScript({
+    model: "m", maxSpendUsd: 0.02, prompt: "p", exposePort: 8080,
+    withBaseKey: true, withRenewer: true, leaseSecondsHint: 600,
+  });
+  assert.match(script, /kind:"shelter-heartbeat"/);
+  assert.match(script, /jobAddress:job/);
+  // Signed field order must match MESSAGE_KEYS in heartbeat.mjs exactly, or the bytes differ.
+  assert.match(script, /\{blockhash:bh,cycle:c,jobAddress:job,payer:me,slot,ts\}/);
+});
