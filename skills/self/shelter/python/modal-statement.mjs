@@ -356,12 +356,27 @@ export async function fetchTunnelRouteDirect(
   origin,
   path,
   expectedContentType,
-  { resolve4Impl = resolve4, requestIpImpl = requestTunnelIp } = {},
+  {
+    resolve4Impl = resolve4,
+    requestIpImpl = requestTunnelIp,
+    sleepImpl = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  } = {},
 ) {
   const validatedOrigin = validateTunnelUrl(origin);
   const hostname = new URL(validatedOrigin).hostname;
-  const addresses = [...new Set(await resolve4Impl(hostname))].sort();
-  if (addresses.length === 0) throw new Error(`no IPv4 address resolved for ${hostname}`);
+  let addresses = [];
+  let resolutionError;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      addresses = [...new Set(await resolve4Impl(hostname))].sort();
+      if (addresses.length > 0) break;
+      resolutionError = new Error(`no IPv4 address resolved for ${hostname}`);
+    } catch (error) {
+      resolutionError = error;
+    }
+    if (attempt < 3) await sleepImpl(500);
+  }
+  if (addresses.length === 0) throw resolutionError;
 
   let lastError;
   for (const ip of addresses) {
