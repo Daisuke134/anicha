@@ -220,6 +220,7 @@ def build_public_statement(
     polymarket_address,
     request_json=request_json,
     heartbeats=(),
+    runtime_cost_usd=RUNTIME_COST_USD,
     now_ms=lambda: int(time.time() * 1000),
 ):
     if not isinstance(sandbox_id, str) or not sandbox_id.startswith("sb-"):
@@ -227,6 +228,7 @@ def build_public_statement(
     base_address = _evm_address(base_address, "base_address")
     solana_address = _solana_address(solana_address)
     polymarket_address = _evm_address(polymarket_address, "polymarket_address")
+    runtime_cost_usd = _nonnegative_number(runtime_cost_usd, "runtime_cost_usd")
     heartbeat_rows = list(heartbeats)
     base_usdc = fetch_base_usdc(base_address, request_json=request_json)
     solana = fetch_solana_balances(solana_address, request_json=request_json)
@@ -248,7 +250,7 @@ def build_public_statement(
         "polymarket": polymarket,
         "economy": {
             "externalRevenueUsd": 0.0,
-            "runtimeCostUsd": RUNTIME_COST_USD,
+            "runtimeCostUsd": runtime_cost_usd,
             "verdict": "funded",
         },
         "heartbeats": {
@@ -377,7 +379,13 @@ def make_statement_handler(
     return StatementHandler
 
 
-def serve_statement(*, statement_file, heartbeats_file, port):
+def serve_statement(
+    *,
+    statement_file,
+    heartbeats_file,
+    port,
+    runtime_cost_usd_provider=None,
+):
     statement = json.loads(Path(statement_file).read_text(encoding="utf-8"))
     heartbeat_path = Path(heartbeats_file)
 
@@ -391,12 +399,16 @@ def serve_statement(*, statement_file, heartbeats_file, port):
         return rows
 
     def current_statement():
+        runtime_cost_usd = statement["economy"]["runtimeCostUsd"]
+        if runtime_cost_usd_provider is not None:
+            runtime_cost_usd = runtime_cost_usd_provider()
         return build_public_statement(
             sandbox_id=statement["sandboxId"],
             base_address=statement["wallets"]["base"],
             solana_address=statement["wallets"]["solana"],
             polymarket_address=statement["wallets"]["polymarket"],
             heartbeats=current_heartbeat_rows(),
+            runtime_cost_usd=runtime_cost_usd,
         )
 
     handler = make_statement_handler(

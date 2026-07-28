@@ -29,6 +29,21 @@ from statement import (
 )
 
 
+def fetch_nosana_runtime_cost_usd(job_address, requests_get=requests.get):
+    response = requests_get(
+        f"https://dashboard.k8s.prd.nos.ci/api/jobs/{job_address}",
+        timeout=15,
+    )
+    response.raise_for_status()
+    job = response.json()
+    timeout = job.get("timeout")
+    hourly_rate = job.get("usdRewardPerHour")
+    for name, value in (("timeout", timeout), ("usdRewardPerHour", hourly_rate)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise ValueError(f"{name} must be a non-negative number")
+    return float(hourly_rate) * float(timeout) / 3600
+
+
 def main():
     job_address = os.environ["NOSANA_JOB_ADDRESS"]
     base_address = os.environ["BASE_PUBLIC_ADDRESS"]
@@ -122,6 +137,7 @@ def main():
         solana_address=payer,
         polymarket_address=DEFAULT_POLYMARKET_ADDRESS,
         heartbeats=verified,
+        runtime_cost_usd=fetch_nosana_runtime_cost_usd(job_address),
     )
     statement_file.write_text(
         json.dumps(statement, separators=(",", ":")) + "\n",
@@ -131,6 +147,7 @@ def main():
         statement_file=statement_file,
         heartbeats_file=heartbeat_file,
         port=8080,
+        runtime_cost_usd_provider=lambda: fetch_nosana_runtime_cost_usd(job_address),
     )
 
 

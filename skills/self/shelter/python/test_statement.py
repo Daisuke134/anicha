@@ -137,6 +137,11 @@ class PublicSnapshot(unittest.TestCase):
         self.assertEqual(statement["heartbeats"], {"claimed": 2, "verified": 2})
         self.assertEqual(statement["generatedAt"], 1785150000123)
 
+    def test_accepts_provider_specific_runtime_cost(self):
+        statement = build_fixture(runtime_cost_usd=0.0289)
+
+        self.assertEqual(statement["economy"]["runtimeCostUsd"], 0.0289)
+
     def test_allowlist_drops_unknown_fields_at_every_level(self):
         candidate = {
             **build_fixture(),
