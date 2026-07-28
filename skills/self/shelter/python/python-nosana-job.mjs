@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 import { buildServiceJobDefinition } from "../nosana/job-definition.mjs";
 
@@ -26,12 +27,14 @@ export function buildPythonNosanaJobDefinition({
       fs.readFileSync(fileURLToPath(new URL(name, here)), "utf8"),
     ]),
   );
-  const encoded = Buffer.from(JSON.stringify(sources), "utf8").toString("base64");
+  const encoded = gzipSync(Buffer.from(JSON.stringify(sources), "utf8"), {
+    level: 9,
+  }).toString("base64");
   const reconstruct = [
-    "import base64,json,pathlib",
+    "import base64,gzip,json,pathlib",
     `r=pathlib.Path("${ROOT}")`,
     "r.mkdir(parents=True,exist_ok=True)",
-    `d=json.loads(base64.b64decode("${encoded}"))`,
+    `d=json.loads(gzip.decompress(base64.b64decode("${encoded}")))`,
     '[(r/n).write_text(s,encoding="utf-8") for n,s in d.items()]',
   ].join(";");
   const command = [
