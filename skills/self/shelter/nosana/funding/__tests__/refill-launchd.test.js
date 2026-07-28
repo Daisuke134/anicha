@@ -13,7 +13,7 @@ test("the scheduled refill runner loads the managed environment and executes the
   const runner = fs.readFileSync(runnerPath, "utf8");
   assert.match(runner, /source "\$HOME\/\.openclaw\/\.env"/);
   assert.match(runner, /ANICCA_HOME=.*\.blockrun/);
-  assert.match(runner, /citizen-refill" --live/);
+  assert.match(runner, /exec \/opt\/homebrew\/bin\/node "\$REPO_ROOT\/bin\/citizen-refill" --live/);
   assert.doesNotMatch(runner, /--dry/);
 });
 
