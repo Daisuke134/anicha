@@ -197,6 +197,40 @@ test("executeRefill accepts a rail that reports success as `sent` rather than `o
   assert.equal(r.ok, true);
 });
 
+test("executeRefill accepts acquireNos settled shape with a signature", async () => {
+  const calls = [];
+  const r = await executeRefill({
+    plan: { act: true, bridgeUsd: 0, swapNeeded: true, topUpNos: 0.25, topUpSol: 0, reason: "short" },
+    swapToNos: async () => ({
+      posted: true,
+      signature: "settled-solana-signature",
+      nosReceived: 2.9,
+    }),
+    topUpSubWallet: async () => {
+      calls.push("topup");
+      return { sent: true, signatures: { nos: "topup-signature" } };
+    },
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(calls, ["topup"]);
+});
+
+test("executeRefill treats an unknown swap result as indeterminate and never tops up", async () => {
+  let toppedUp = false;
+  const r = await executeRefill({
+    plan: { act: true, bridgeUsd: 0, swapNeeded: true, topUpNos: 0.25, topUpSol: 0, reason: "short" },
+    swapToNos: async () => ({ something: "unexpected" }),
+    topUpSubWallet: async () => {
+      toppedUp = true;
+      return { sent: true };
+    },
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.indeterminate, true);
+  assert.equal(toppedUp, false);
+  assert.match(r.reason, /MAY have gone through/);
+});
+
 test("an unreadable top-up result is indeterminate, never a plain failure", async () => {
   // The dangerous case: money may already have moved. Reporting "failed" invites a retry that
   // sends it twice.
