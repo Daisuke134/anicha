@@ -102,4 +102,4 @@
 - [x] Run a second paid Modal bootstrap after the first sandbox is gone. Require recovery of the same job, zero second list transaction, and no re-delivery when the recovered job is already RUNNING.
 - [x] Observe one in-container lease extension and independently verify its transaction plus increased timeout.
 - [x] Run secret-pattern scans, all test suites, `git diff --check`, and fresh provider/API/RPC readbacks.
-- [ ] Mark S21 complete in both SSOTs, advance the cursor to `EARN-HC-1`, commit task-owned files, and push both repositories.
+- [x] Mark S21 complete in both SSOTs, advance the cursor to `EARN-HC-1`, commit task-owned files, and push both repositories.
