@@ -19,7 +19,7 @@ import time
 
 import base58
 from nacl.public import PrivateKey, SealedBox
-from nacl.signing import SigningKey
+from nacl.signing import SigningKey, VerifyKey
 import requests
 from solders.hash import Hash
 from solders.instruction import AccountMeta, Instruction
@@ -223,6 +223,41 @@ def select_active_job(jobs: list[dict], *, payer: str, market: str) -> dict | No
     return max(eligible, key=lambda job: (int(job.get("timeStart") or 0), job["address"]))
 
 
+def select_successor_job(
+    jobs: list[dict],
+    *,
+    current_address: str,
+    payer: str,
+    market: str,
+) -> dict | None:
+    """Return the sole active successor and fail closed above the two-job cap."""
+
+    active = [
+        job
+        for job in jobs
+        if isinstance(job, dict)
+        and job.get("payer") == payer
+        and job.get("market") == market
+        and int(job.get("state", -1)) in (0, 1)
+        and isinstance(job.get("address"), str)
+        and job["address"]
+    ]
+    current = next(
+        (job for job in active if job.get("address") == current_address),
+        None,
+    )
+    if current is None:
+        raise RuntimeError("current active job is missing; refusing replacement")
+    successors = [job for job in active if job.get("address") != current_address]
+    if len(successors) > 1:
+        raise RuntimeError("two-job cap exceeded; refusing another shelter replacement")
+    if successors and int(successors[0].get("timeStart") or 0) <= int(
+        current.get("timeStart") or 0
+    ):
+        raise RuntimeError("active peer is not newer than current job; refusing replacement")
+    return successors[0] if successors else None
+
+
 def bind_job_address(value, job_address: str):
     """Replace only the explicit confidential-definition placeholder."""
 
@@ -362,7 +397,12 @@ def _requests_get(*, url: str, headers: dict | None = None, timeout: float = 15)
         payload = response.json()
     except Exception:
         pass
-    return {"ok": response.ok, "status": response.status_code, "json": payload}
+    return {
+        "ok": response.ok,
+        "status": response.status_code,
+        "json": payload,
+        "text": response.text,
+    }
 
 
 def reconcile_running_service(
@@ -401,6 +441,76 @@ def reconcile_running_service(
                 "serviceUrl": service_url,
             }
     return None
+
+
+def verify_successor_service(
+    *,
+    job: dict,
+    payer: str,
+    cid: str,
+    secret_bytes: bytes,
+    request_get=_requests_get,
+    now_ms=lambda: int(time.time() * 1000),
+) -> dict:
+    """Verify the public handover surface and a heartbeat bound to job and payer."""
+
+    address = job.get("address") if isinstance(job, dict) else None
+    node = job.get("node") if isinstance(job, dict) else None
+    if not address or not node or not payer:
+        raise ValueError("successor job, node, and payer are required")
+    authorization = build_authorization(cid, secret_bytes, now_ms=now_ms())
+    endpoints = request_get(
+        url=f"https://{node}.{DEFAULT_NODE_DOMAIN}/job/{address}/endpoints",
+        headers={"Authorization": authorization},
+        timeout=15,
+    )
+    payload = endpoints.get("json") if isinstance(endpoints, dict) else None
+    urls = payload.get("urls", {}) if isinstance(payload, dict) else {}
+    service_urls = sorted(
+        row["url"].rstrip("/")
+        for row in urls.values()
+        if isinstance(row, dict)
+        and isinstance(row.get("url"), str)
+        and row["url"].startswith("https://")
+    )
+    if not service_urls:
+        raise RuntimeError("successor service has no public HTTPS endpoint")
+    service_url = service_urls[0]
+    probes = {}
+    for path in ("/", "/statement.json", "/heartbeats"):
+        probe = request_get(url=f"{service_url}{path}", headers={}, timeout=15)
+        if not isinstance(probe, dict) or int(probe.get("status", 0)) != 200:
+            raise RuntimeError(f"successor service {path} did not return HTTP 200")
+        probes[path] = probe
+    statement = probes["/statement.json"].get("json")
+    if (
+        not isinstance(statement, dict)
+        or (statement.get("wallets") or {}).get("solana") != payer
+    ):
+        raise RuntimeError("successor statement is not bound to the expected payer")
+    try:
+        from heartbeat import build_heartbeat_message
+
+        rows = [
+            json.loads(line)
+            for line in str(probes["/heartbeats"].get("text") or "").splitlines()
+            if line.strip()
+        ]
+        heartbeat = rows[-1]
+        if heartbeat.get("jobAddress") != address or heartbeat.get("payer") != payer:
+            raise ValueError("heartbeat identity differs")
+        VerifyKey(base58.b58decode(payer)).verify(
+            build_heartbeat_message(heartbeat).encode("utf-8"),
+            base58.b58decode(heartbeat["sig"]),
+        )
+    except Exception as exc:
+        raise RuntimeError("successor heartbeat verification failed") from exc
+    return {
+        "serviceUrl": service_url,
+        "httpStatus": {path: int(probes[path]["status"]) for path in probes},
+        "heartbeatVerified": True,
+        "heartbeatCycle": int(heartbeat["cycle"]),
+    }
 
 
 def submit_list_job(
