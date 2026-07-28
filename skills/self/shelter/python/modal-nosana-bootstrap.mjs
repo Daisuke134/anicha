@@ -21,6 +21,8 @@ const MAX_COMMAND_PART = 2000;
 const SANDBOX_ROOT = "/tmp/s21-nosana";
 const SANDBOX_SOURCE = `${SANDBOX_ROOT}/nosana_bootstrap.py`;
 const SANDBOX_KEY = `${SANDBOX_ROOT}/bootstrap.key`;
+const SANDBOX_RECEIPT = `${SANDBOX_ROOT}/bootstrap.receipt`;
+const SANDBOX_STDERR = `${SANDBOX_ROOT}/bootstrap.stderr`;
 const DEFAULT_MARKET = "7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq";
 
 
@@ -133,11 +135,23 @@ export function buildBootstrapCommand({ ciphertextChunks } = {}) {
     throw new Error("ciphertext chunks are required");
   }
   const script = [
-    `exec python ${SANDBOX_SOURCE} bootstrap`,
+    `rm -f ${SANDBOX_RECEIPT} ${SANDBOX_STDERR};`,
+    `nohup python ${SANDBOX_SOURCE} bootstrap`,
     `--key-path ${SANDBOX_KEY}`,
     '"$@"',
+    `>${SANDBOX_RECEIPT} 2>${SANDBOX_STDERR} &`,
+    `printf '{"ok":true,"sandboxId":"%s","started":true}\\n' "$MODAL_SANDBOX_ID"`,
   ].join(" ");
   return assertBounded(["sh", "-c", script, "nosana-bootstrap-ciphertext", ...ciphertextChunks]);
+}
+
+
+export function buildCollectCommand() {
+  const script =
+    `for i in $(seq 1 55); do if [ -s ${SANDBOX_RECEIPT} ]; then ` +
+    `cat ${SANDBOX_RECEIPT}; exit 0; fi; sleep 1; done; ` +
+    `printf '{"ok":false,"sandboxId":"%s","error":"bootstrap receipt is still pending"}\\n' "$MODAL_SANDBOX_ID"`;
+  return assertBounded(["sh", "-c", script]);
 }
 
 
@@ -228,6 +242,8 @@ export async function bootstrapNosanaFromModal({
   fetchImpl,
   timeoutSec = 600,
   modalTimeoutSec = 300,
+  waitImpl = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  collectDelayMs = 90_000,
 } = {}) {
   if (!baseKey && !fetchImpl) throw new Error("no Base key to pay for Modal");
   const doFetch = fetchImpl || (await payingFetch(baseKey));
@@ -271,9 +287,24 @@ export async function bootstrapNosanaFromModal({
   if (!bootstrapped.ok) {
     throw new Error(`Modal bootstrap exec failed with HTTP ${bootstrapped.status}`);
   }
+  const started = parseControlLine(
+    String(bootstrapped.json?.stdout ?? bootstrapped.json?.output ?? ""),
+    "bootstrap-start",
+  );
+  if (started.sandboxId !== sandboxId || started.started !== true) {
+    throw new Error("bootstrap-start receipt is incomplete");
+  }
+  await waitImpl(collectDelayMs);
+  const collected = await postModal(doFetch, "sandbox/exec", {
+    sandbox_id: sandboxId,
+    command: buildCollectCommand(),
+  });
+  if (!collected.ok) {
+    throw new Error(`Modal collect exec failed with HTTP ${collected.status}`);
+  }
   const receipt = safeBootstrapReceipt(
     parseControlLine(
-      String(bootstrapped.json?.stdout ?? bootstrapped.json?.output ?? ""),
+      String(collected.json?.stdout ?? collected.json?.output ?? ""),
       "bootstrap",
     ),
     { sandboxId, market },
@@ -286,7 +317,8 @@ export async function bootstrapNosanaFromModal({
       createHttpStatus: created.status,
       prepareHttpStatus: prepared.status,
       bootstrapHttpStatus: bootstrapped.status,
-      execCount: 2,
+      collectHttpStatus: collected.status,
+      execCount: 3,
     },
   };
 }

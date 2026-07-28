@@ -7,6 +7,7 @@ import nacl from "tweetnacl";
 import {
   bootstrapNosanaFromModal,
   buildBootstrapCommand,
+  buildCollectCommand,
   buildPrepareCommand,
   sealBootstrapBundle,
 } from "./modal-nosana-bootstrap.mjs";
@@ -55,6 +56,8 @@ test("sealed bundle and bootstrap command contain ciphertext, never plaintext", 
   assert.equal(transport.includes(secretBundle.baseKey), false);
   assert.equal(transport.includes("definition-secret"), false);
   assert.match(command[2], /bootstrap/);
+  assert.match(command[2], /nohup/);
+  assert.match(buildCollectCommand()[2], /bootstrap\.receipt/);
 
   const wire = Buffer.from(sealed.chunks.join(""), "base64");
   const ephemeralPublic = wire.subarray(0, nacl.box.publicKeyLength);
@@ -79,6 +82,7 @@ test("paid adapter creates once and performs both execs in the same sandbox", as
   const responses = [
     { sandbox_id: "sb-s21", status: "running" },
     { stdout: `${JSON.stringify({ ok: true, sandboxId: "sb-s21", publicKey: sandboxPublicKey })}\n`, returncode: 0 },
+    { stdout: `${JSON.stringify({ ok: true, sandboxId: "sb-s21", started: true })}\n`, returncode: 0 },
     {
       stdout: `${JSON.stringify({
         ok: true,
@@ -111,6 +115,7 @@ test("paid adapter creates once and performs both execs in the same sandbox", as
     market: secretBundle.market,
     timeoutSec: secretBundle.timeoutSec,
     fetchImpl,
+    waitImpl: async () => {},
   });
 
   assert.equal(result.ok, true);
@@ -123,10 +128,12 @@ test("paid adapter creates once and performs both execs in the same sandbox", as
       "/api/v1/modal/sandbox/create",
       "/api/v1/modal/sandbox/exec",
       "/api/v1/modal/sandbox/exec",
+      "/api/v1/modal/sandbox/exec",
     ],
   );
   assert.equal(requests[1].body.sandbox_id, "sb-s21");
   assert.equal(requests[2].body.sandbox_id, "sb-s21");
+  assert.equal(requests[3].body.sandbox_id, "sb-s21");
   assert.equal(requests[0].body.timeout, 300);
   const paidPayloads = JSON.stringify(requests);
   assert.equal(paidPayloads.includes(secretBundle.solanaSecret), false);
@@ -139,6 +146,7 @@ test("a later sandbox can reconcile the same job without a second list", async (
   const responses = [
     { sandbox_id: "sb-restart", status: "running" },
     { stdout: `${JSON.stringify({ ok: true, sandboxId: "sb-restart", publicKey: sandboxPublicKey })}\n`, returncode: 0 },
+    { stdout: `${JSON.stringify({ ok: true, sandboxId: "sb-restart", started: true })}\n`, returncode: 0 },
     {
       stdout: `provider diagnostic that is not part of the control receipt\n${JSON.stringify({
         ok: true,
@@ -160,6 +168,7 @@ test("a later sandbox can reconcile the same job without a second list", async (
     definition: secretBundle.definition,
     market: secretBundle.market,
     timeoutSec: secretBundle.timeoutSec,
+    waitImpl: async () => {},
     fetchImpl: async () => ({
       ok: true,
       status: 200,
@@ -183,6 +192,7 @@ test("prepare response must be bound to the sandbox being paid for", async () =>
         publicKey: sandboxPublicKey,
       })}\n`,
     },
+    { stdout: `${JSON.stringify({ ok: true, sandboxId: "sb-right", started: true })}\n` },
   ];
   await assert.rejects(
     bootstrapNosanaFromModal({

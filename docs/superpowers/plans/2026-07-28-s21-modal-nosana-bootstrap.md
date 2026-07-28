@@ -4,7 +4,7 @@
 
 **Goal:** A paid managed Python sandbox, not the Mac, posts or recovers Franklin's confidential Nosana job, delivers its private definition, and exits after the Nosana runtime proves signed heartbeat, financial statement, and self-renewal.
 
-**Architecture:** Modal is a short-lived bootstrap/poster rail. Exec 1 installs pinned Python dependencies and creates an ephemeral sealed-box keypair inside the sandbox. The caller encrypts the capped Solana/Base sub-wallet material to that public key. Exec 2 receives only ciphertext, decrypts in the sandbox, reconciles an existing active Nosana job before spending, otherwise hand-builds and signs the official Anchor `list` instruction, then repeatedly delivers the confidential definition to the claimed node. Nosana chain/API is the durable restart state; the sandbox and Mac are not.
+**Architecture:** Modal is a short-lived bootstrap/poster rail. Exec 1 installs pinned Python dependencies and creates an ephemeral sealed-box keypair inside the sandbox. The caller encrypts the capped Solana/Base sub-wallet material to that public key. Exec 2 starts the ciphertext-only bootstrap in the sandbox background; exec 3 collects its allowlisted receipt after Nosana's claim window. The bootstrap reconciles an existing active Nosana job before spending, otherwise hand-builds and signs the official Anchor `list` instruction, then repeatedly delivers the confidential definition to the claimed node. Nosana chain/API is the durable restart state; the sandbox and Mac are not. The original two-exec assumption was falsified live: Modal's synchronous exec response ends around 60 seconds while Nosana claim can exceed that.
 
 **Tech Stack:** Python 3.11, solders 0.27.1, PyNaCl 1.6.2, requests 2.34.2, base58 2.1.1, Node 20+, BlockRun x402 Modal adapter, Solana JSON-RPC, Nosana Jobs program.
 
@@ -85,7 +85,7 @@
 
 - [x] Write RED tests for two-exec order, 2,000-character command parts, pinned dependencies, no plaintext secret in either command, sandbox-ID binding, allowlisted output, and restart recovery.
 - [x] Package only public Python source in exec 1; encrypt secrets after its public key returns.
-- [x] Reuse `moveIn`'s paying fetch while extending it with an explicit same-sandbox exec helper; cap at create + two execs.
+- [x] Reuse `moveIn`'s paying fetch while extending it with an explicit same-sandbox exec helper; use create + prepare + background-bootstrap + receipt collection because the live claim window exceeds one synchronous exec.
 - [x] Run Node/Python/shelter regression suites GREEN and commit.
 
 ### Task 4: Live proof and Mac cutover
