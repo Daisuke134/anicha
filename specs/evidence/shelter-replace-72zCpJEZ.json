@@ -1,0 +1,100 @@
+{
+  "v": 1,
+  "claim": "A capped-wallet Franklin runtime lists, confidentially delivers, and independently verifies one successor Nosana shelter before the old shelter stops",
+  "payer": "71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf",
+  "market": "7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq",
+  "finalHandover": {
+    "oldJob": {
+      "address": "5A6CojH1bxjBK4UsLBQANNLZeUBUUAkHbvRMWe4jgnwd",
+      "stateBefore": 1,
+      "stateAfter": 2,
+      "timeStart": 1785243477,
+      "timeEnd": 1785243848,
+      "timeoutSeconds": 2400,
+      "acceleratedStopSignature": "2BDoHU6QySyQCE7dYgr4XT2hMvnsojHPrLeqxg6Nsdd2CE2MsteTdnxcS4gnQ9vKNsR1VPTL8R287b1x8VGvWGF2"
+    },
+    "successorJob": {
+      "address": "72zCpJEZLcM57DuPjCWthZBvKZyL3JH47zGwTidU2YKN",
+      "state": 1,
+      "timeStart": 1785243722,
+      "timeoutSecondsAtSnapshot": 1800,
+      "node": "JE4SBEMbttW79npzeYWvuVDxAYaDck3U51zrebkSB4y9",
+      "listSignature": "jF6qqVd4F3WLdcBrbxBjqTKpTCGx4WLwAWNNoDAh4Z6QHX8m447cYzCnnWZ5P2Z7HKfcoqwNDPpJL5qGskZEPEW",
+      "listStatus": "finalized",
+      "confidentialDeliveryHttpStatus": 200,
+      "serviceUrl": "https://4ehZRtppzpMT4V2pKBbN9gKxBf67135c1iTndzCKuiZ3.node.k8s.prd.nos.ci"
+    },
+    "orderingObserved": [
+      "old state 1",
+      "successor state 1",
+      "successor public service verified",
+      "old state 2"
+    ],
+    "activeJobCountAfterHandover": 1
+  },
+  "publicProof": {
+    "httpStatus": {
+      "/": 200,
+      "/statement.json": 200,
+      "/heartbeats": 200
+    },
+    "heartbeatsClaimed": 3,
+    "heartbeatsVerifiedByStatement": 3,
+    "independentVerifier": {
+      "command": "bin/citizen-steward --verify <public heartbeat JSONL> --job 72zCpJEZ... --rpc",
+      "passed": 3,
+      "failed": 0,
+      "allBlockhashesMatchedClaimedSlots": true
+    },
+    "externalRevenueUsd": 0.0,
+    "runtimeCostUsdAtSnapshot": 0.021870518
+  },
+  "moneySafety": {
+    "solBalanceAfterHandover": 0.013662961,
+    "nosBalanceAfterHandover": 0.670368,
+    "solFeeFloor": 0.005,
+    "moveOutReserveNos": 0.34,
+    "successorRequestedTimeoutSeconds": 600,
+    "successorEscrowUsesRequestedTimeout": true,
+    "twoJobCap": true,
+    "refillSignatureDuringLiveProof": "3E7w1mcZWLSKVnKdovxqXABFj78sYw3W4syoFFf2ruGB18oseewn6eyLvKudeRR8dfvZiRV8X8urm1PU5jgHzQ9q"
+  },
+  "mac": {
+    "ai.anicca.franklin1LaunchctlExit": 113,
+    "com.anicca.franklin1LaunchctlExit": 113,
+    "franklin1Loaded": false
+  },
+  "tests": {
+    "python": {
+      "passed": 63,
+      "failed": 0
+    },
+    "nodeShelter": {
+      "passed": 197,
+      "failed": 0
+    },
+    "pythonCompile": "passed",
+    "nosanaCliDefinitionValidation": "Valid Job Definition",
+    "gitDiffCheck": "passed"
+  },
+  "failuresFoundAndFixed": [
+    {
+      "symptom": "Modal prepare returned no control line",
+      "cause": "the standalone bootstrap poster imported heartbeat.py at module load although that sibling is not delivered to Modal",
+      "fix": "load the heartbeat verifier only inside successor-service verification",
+      "moneyMoved": false,
+      "jobListed": false
+    },
+    {
+      "symptom": "replacement gate refused while 0.6636 NOS remained",
+      "cause": "the gate priced the market maximum 7200-second timeout and preserved a second 0.34 NOS reserve instead of pricing the requested 600-second move",
+      "fix": "replacement escrows price times requested timeout and may spend the reserve saved for moving",
+      "onChainBasis": "Nosana list.rs calls get_deposit(timeout) with the supplied timeout"
+    }
+  ],
+  "evidenceLimit": {
+    "proven": "the production replacement controller completed real list, claim, confidential delivery, HTTP verification, heartbeat signature verification, bounded overlap, and old-to-terminal handover",
+    "notYetProven": "the wall-clock 21600-second trigger has not naturally fired; force-once called the same controller to avoid a six-hour wait",
+    "nextObservation": "the current job carries the final code and will first exercise the natural ceiling trigger near its 21600-second limit"
+  }
+}

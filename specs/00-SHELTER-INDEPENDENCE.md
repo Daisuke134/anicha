@@ -9,12 +9,12 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | 項目 | 現在の実測 |
 |---|---|
 | Mac Franklin1 | **unloaded**（`launchctl print` exit `113`）。Franklin2 は `state=running` のまま |
-| cloud runtime | Nosana job `DdUqQh8Tm3LVXhUYsBbDmhuQNgAQhdAuc6XpgUAvWPS4`、service [`3r9A…node.k8s.prd.nos.ci`](https://3r9A3tsCCbuMCXxbKLbKGJVfpFofga6q69Tt4vUYZKMY.node.k8s.prd.nos.ci)、3 public routes HTTP 200 |
-| 生存証拠 | Python heartbeat **4/4署名検証PASS**。lease は container 自身が `600→2400s` に延長し、3 tx finalized |
-| 決算書 | 外部収入 `$0.00`、Nosana API の実単価から計算した runtime cost `$0.0288967687`、API/公開値差分ゼロ |
-| restart | 1回目 Modal `sb-wfum2N1044meGAswyc3zSC` が list、2回目 `sb-52EMSJtDW5vQI8fE11NUD3` は同じjobを recover。2回目のlist txは **null** |
-| 証拠 | `specs/evidence/s21-modal-nosana-bootstrap-sb-wfum2N1044meGAswyc3zSC.json` |
-| current cursor | **13c-SELL / 13c-WORK** — colony外buyer/jobから累計 `$1` のverified着金を作る |
+| cloud runtime | Nosana job `72zCpJEZLcM57DuPjCWthZBvKZyL3JH47zGwTidU2YKN`、service [`4ehZR…node.k8s.prd.nos.ci`](https://4ehZRtppzpMT4V2pKBbN9gKxBf67135c1iTndzCKuiZ3.node.k8s.prd.nos.ci)、3 public routes HTTP 200 |
+| 生存証拠 | Python heartbeat **3/3署名検証PASS**。独立 JS verifier + Solana RPC でも **3/3 PASS**、全 blockhash が claimed slot と一致。lease は container 自身が `600→1800s` に延長 |
+| 決算書 | 外部収入 `$0.00`、Nosana API の実単価から計算した snapshot runtime cost `$0.021870518`、verdict `funded` |
+| 自動交代 | controller の実 mainnet handover 完了。旧 `5A6C…` state 1 → 後継 `72zC…` state 1 + public proof 検証 → 旧 state 2、終了後 active job は1件 |
+| 証拠 | `specs/evidence/shelter-replace-72zCpJEZ.json`（旧 S21 証拠も履歴として維持） |
+| current cursor | **TASKMARKET-READBACK-1**。自然な6時間 trigger の初回観測だけは W5 に分離し、実装順を止めない |
 
 ## 検証済みの履歴（以下は各時点のスナップショット）
 
@@ -42,6 +42,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 | 6 | S16 | **注文する道具を agent に渡す**（家を「継承する」のをやめる） | ✅ **完了 2026-07-27**。それまでは人間が1軒目を post し agent は結果を受け取るだけ = 小遣いであって収入ではなかった。`skills/self/shelter/buy-house.mjs` を container に base64 一行で配送し、agent が自分の鍵で発注する。**live 実証: job `7cu6bmHzRnnEdetrzh3QYeWFuGjgKm8J9x5rufhxDdCs` の中から `{"ok":true,"rail":"modal","id":"sb-85okeYAh2O6PxtjD8s9Rrb","spentUsd":0.01}`** — 外部の誰も発注していない。cap は network 到達前に `planPurchase` が判定（$0.50/call）。2026-07-27 追加: 同じ verb に Nosana rail を実装（`buyHouseOnNosana` / `rentAnywhere`）— 呼ぶ側は「どちらの大家がどんな作法か」を知らなくてよい。これが blockrun-mcp への PR の中身になる |
 | 7 | S17 | **決算書を agent 自身に公開させる**（生きている・自費で払った・稼ぎはゼロ、を第三者が検算できる形で） | ✅ **実装完了 2026-07-27**（`skills/self/shelter/statement.mjs`、9/9 + 全体 129/129 tests）。設計の核: **blacklist（秘密を消す）ではなく allowlist（宣言した field しか描画しない）**。理由 = Solana の署名と Solana の秘密鍵はどちらも base58 87-88字で、**形で見分けることが原理的に不可能**だから scrubber は当てにならない。自己決済は revenue に数えない（`from:"self"` を除外）ので、verdict は外部入金があるまで `funded` から動かない。`/` = 決算書、`/log` = 生ログ、`/heartbeats` = 検算用の生データ。container 側は各支出時に `/tmp/ledger.jsonl` へ1行書き、renewer が45秒ごとに最新 blockhash を自分の鍵で署名して heartbeat 行を足す | ✅ **live 実証完了 2026-07-27** — job `AzUFmVa5qeibfgXUpKW1szw7XXeK9x2S6JANkTnvhC3p`、公開 URL `https://2SRDLpUEKRXgpaAXMWs1KcVhmKGVofjgH4EBXcsqGsq4.node.k8s.prd.nos.ci`（証拠 `specs/evidence/s17-statement-AzUFmVa5.html` / `s17-heartbeats-AzUFmVa5.json`）。ページが実際に出したもの: 支出3件（飯 tx `0x186c1e56…` / 2軒目 `sb-axOzfUwsc0NwBE0Vo7kEqr` / **自己 lease 延長 tx `iJTfrgbF…`**）、収入 `$0.00 from outside`、heartbeat 12件。**第三者検証を自分で回した結果: 署名 12/12 有効・blockhash 12/12 が実 slot と chain 一致**。lease は 600→1200 秒に自己延長された（`jobs.get` = `state: RUNNING, timeout: 1200` 実測）。**発見して潰した表示バグ**: `toFixed(2)` が家賃 $0.008・思考 $0.003 を全部 `$0.00` に丸め、実 tx の隣に「何も起きていない」と表示していた。サブセントは4桁で出す（真のゼロだけは `$0.00` のまま — そこは見逃されては困る）。
+| 8 | S22 / SHELTER-REPLACE-1 | **6時間の天井を「終了」ではなく「引越し」にする**。現在の Nosana container が capped shelter wallet で後継を1件だけ list、claim 後に confidential definition を配送し、`/`・`/statement.json`・`/heartbeats` と署名 heartbeat を検証して初めて handover 完了を記録する。payer/market/state/timeStart を public API の durable ledger とし、restart は既存後継を再利用。現 job + 後継の2件を上限にし、古い active peer や3件目は fail closed。 | ✅ **実装 + force-once live handover 完了**。最終 job `72zCpJEZ…`、list tx `jF6qqVd4…` finalized、confidential delivery HTTP 200、3 routes HTTP 200、heartbeat 3/3 は署名 + slot/blockhash とも独立検証PASS。旧 `5A6C…` は後継検証後 state 2、active=1。Python 63/63、Node shelter 197/197、CLI definition validation PASS。**証拠の限界:** wall-clock 21600秒 trigger 自体はまだ自然発火していない。待ちを6時間短縮するため同じ controller を force-once で呼んだ。自然発火の初回readbackは W5 |
 
 ### B. 稼ぎ（agent economy — diversified・全 rail real・dry ゼロ）
 
@@ -221,7 +222,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 ### 待たない（今やる。全部こちらだけで閉じる）
 
-**現在地**: 支出側・異種runtime冗長化・Mac-off・earning rail health contractまで閉じた。次は **13c-SELL / 13c-WORK: 外部payerから累計 `$1`**。
+**現在地**: 支出側・異種runtime冗長化・Mac-off・earning rail health contract・Nosana shelter handoverまで閉じた。次は **TASKMARKET-READBACK-1: 実 work loop の結果を Life Manager 台帳へ exactly-once で戻す**。外部payerの出現だけに依存する13c-SELLは待ちへ分離する。
 
 | 順 | ID | やること | 状態 / なぜこの順か |
 |---|---|---|---|
@@ -230,7 +231,9 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | ~~1~~ | **S20b** | **2軒目で生き延びる（Python 版の最小生存機能）** | ✅ 完了。x402、Python heartbeat、公開allowlist決算書を同じ `python:3.11` rail で実証。Node版Franklinではなく生存契約の異種runtime実装 |
 | ~~1~~ | **S21** | bootstrap を Modal へ（Mac の関与を資金だけにする） | ✅ **完了**。Python が hand-built list instruction、confidential delivery、restart recovery、自己renewを実行。Mac Franklin1 unloaded 後も heartbeat/決算書が継続 |
 | ~~1~~ | **EARN-HC-1** | earning rail health contract | ✅ **完了**。8/8 instrumented、NOT-INSTRUMENTED 0。PM/x402/WORK/CAPITALは4/4 operational、inactive railはfrozen/not-liveへ固定 |
-| **1** | **13c-SELL / 13c-WORK** | colony外buyer/jobから累計 `$1` のverified着金 | **current cursor**。external payer + finalized receipt + provenance + ledger exactly-once。self-payは0、現在の外部収益は `$0.00` |
+| ~~1~~ | **S22 / SHELTER-REPLACE-1** | 6時間 ceiling 前に successor を list→confidential deliver→public proof verify | ✅ 実装 + force-once mainnet handover完了。wall-clock自然発火だけW5で観測待ち |
+| **1** | **TASKMARKET-READBACK-1** | 実 work loop の verified result を Life Manager earnings ledger へ exactly-once 記帳 | **current cursor**。既存 loop の実結果を readback して月次報告へ接続する |
+| 待ち | **13c-SELL / 13c-WORK** | colony外buyer/jobから累計 `$1` のverified着金 | external payer + finalized receipt + provenance が必要。self-payは0、現在の外部収益は `$0.00` |
 | 3 | D群 | Life Manager 接続（custody / dashboard / cap UI / 法務） | agent economyをコード統合せず、wallet/ledger/health contractの3契約でLife Managerから管理する |
 | 4 | F群 | 記事 EN 更新 → JP | 数字待ちだが、**仕組みと検証手順は今書ける**。冗長化の記述は S20b の結果で書き換えが要る（現状の主張は実測より強い） |
 
@@ -343,7 +346,7 @@ Python から Nosana に job を post する経路を一次ソースで確認し
 | 段 | 誰 | 実測（2026-07-27 深夜） | 役割 |
 |---|---|---|---|
 | treasury | owner `F5SYUC4f5QULbEgSYb1DFCBfi74AnWE3ZaXAhqXwhZ5T` | **0.607 NOS** | 資金の受け皿。`resolveSolanaSecret` が返すのはこっち |
-| shelter | sub-wallet `71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf`（`$ANICCA_HOME/.automaton/nosana_subwallet_key.json`） | **0.60408 NOS**（S21 snapshot。初回top-up capは0.75） | **家賃を実際に払う**。cap = 残高。cloud へ出る鍵はこれだけ |
+| shelter | sub-wallet `71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf`（`$ANICCA_HOME/.automaton/nosana_subwallet_key.json`） | **0.670368 NOS / 0.013662961 SOL**（SHELTER-REPLACE-1 snapshot、top-up cap 0.75 NOS） | **家賃を実際に払う**。cap = 残高。cloud へ出る鍵はこれだけ |
 
 S19 の初回実装は treasury だけを見て「補給が要る」と判断していた。だが treasury は既に潤沢で、飢えているのは shelter の方。**橋は正しく渡るが、家賃を払う財布の1つ手前で止まる。** 補給は3脚（bridge → swap → **top-up**）で、最後の `fundSubWallet` が無いと何も解決しない。各脚は前の脚が成功した時だけ走る（届いていない金は動かせない）。
 
@@ -357,6 +360,7 @@ S19 の初回実装は treasury だけを見て「補給が要る」と判断し
 | W2 | Dais の入金判断 | S18 が入ってから。目安 1 NOS ≈ 33時間 shelter、$5 ≈ 1週間連続稼働 |
 | W3 | PM 決着 2026-07-29 | 含み益 +$1.12 が realized に。loop 設置済み・自動 |
 | W4 | 上流 PR [#82](https://github.com/BlockRunAI/blockrun-mcp/pull/82) のレビュー | merge されれば買い手の目の前に rail が並ぶ |
+| W5 | final runtime `72zCpJEZ…` が自然に 21600秒 ceiling の replacement margin へ入る | force-once ではなく wall-clock trigger で list→verify→旧 state 2 を再readbackし、証拠の最後の穴を閉じる。実装順は止めず TASKMARKET-READBACK-1 を進める |
 
 ### G0. 上流 PR — 我々の rail を買い手のいる場所へ（2026-07-27）
 

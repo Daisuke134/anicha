@@ -1,14 +1,20 @@
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 
 from nacl.public import PublicKey, SealedBox
+from nacl.signing import SigningKey
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 
+from heartbeat import make_heartbeat_entry
 from nosana_bootstrap import (
     CONFIDENTIAL_STUB_CID,
     JOBS_PROGRAM,
@@ -26,7 +32,9 @@ from nosana_bootstrap import (
     parse_market_account,
     reconcile_running_service,
     select_active_job,
+    select_successor_job,
     submit_list_job,
+    verify_successor_service,
 )
 
 
@@ -195,6 +203,50 @@ class BootstrapBehaviorTests(unittest.TestCase):
         self.assertEqual(select_active_job(jobs, payer="payer", market=MARKET)["address"], "new")
         self.assertIsNone(select_active_job(jobs, payer="payer", market="another-market"))
 
+    def test_successor_selection_excludes_current_and_reuses_one_newer_active_job(self):
+        jobs = [
+            {"address": "current", "payer": "payer", "market": MARKET, "state": 1, "timeStart": 10},
+            {"address": "done", "payer": "payer", "market": MARKET, "state": 2, "timeStart": 11},
+            {"address": "successor", "payer": "payer", "market": MARKET, "state": 1, "timeStart": 20},
+            {"address": "other", "payer": "other", "market": MARKET, "state": 1, "timeStart": 30},
+        ]
+        self.assertEqual(
+            select_successor_job(
+                jobs,
+                current_address="current",
+                payer="payer",
+                market=MARKET,
+            )["address"],
+            "successor",
+        )
+
+    def test_successor_selection_fails_closed_above_two_job_cap(self):
+        jobs = [
+            {"address": "current", "payer": "payer", "market": MARKET, "state": 1, "timeStart": 10},
+            {"address": "next-a", "payer": "payer", "market": MARKET, "state": 1, "timeStart": 20},
+            {"address": "next-b", "payer": "payer", "market": MARKET, "state": 0, "timeStart": 30},
+        ]
+        with self.assertRaisesRegex(RuntimeError, "two-job cap"):
+            select_successor_job(
+                jobs,
+                current_address="current",
+                payer="payer",
+                market=MARKET,
+            )
+
+    def test_successor_selection_rejects_an_older_active_peer(self):
+        jobs = [
+            {"address": "older", "payer": "payer", "market": MARKET, "state": 1, "timeStart": 10},
+            {"address": "current", "payer": "payer", "market": MARKET, "state": 1, "timeStart": 20},
+        ]
+        with self.assertRaisesRegex(RuntimeError, "not newer"):
+            select_successor_job(
+                jobs,
+                current_address="current",
+                payer="payer",
+                market=MARKET,
+            )
+
     def test_job_address_placeholder_is_bound_only_after_reconciliation(self):
         original = {
             "ops": [{"args": {"env": {
@@ -271,6 +323,26 @@ class BootstrapBehaviorTests(unittest.TestCase):
             self.assertEqual(decrypt_bootstrap_bundle(ciphertext, key_path), json.loads(plaintext))
             self.assertNotIn(b"secret-sol", ciphertext)
 
+    def test_prepare_key_cli_runs_when_bootstrap_is_delivered_without_sibling_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            isolated_source = Path(tmp) / "nosana_bootstrap.py"
+            shutil.copyfile(Path(__file__).parent / "nosana_bootstrap.py", isolated_source)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(isolated_source),
+                    "prepare-key",
+                    "--key-path",
+                    str(Path(tmp) / "bootstrap.key"),
+                ],
+                env={**os.environ, "MODAL_SANDBOX_ID": "sb-isolated"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["sandboxId"], "sb-isolated")
+
     def test_delivery_retries_finitely_and_returns_only_safe_receipt(self):
         calls = []
         responses = iter(
@@ -336,6 +408,99 @@ class BootstrapBehaviorTests(unittest.TestCase):
         self.assertFalse(receipt["delivered"])
         self.assertEqual(receipt["serviceUrl"], "https://service.example")
         self.assertEqual(len(calls), 2)
+
+    def test_successor_service_requires_all_endpoints_and_matching_signed_heartbeat(self):
+        key = SigningKey(bytes(range(32)))
+        payer = __import__("base58").b58encode(key.verify_key.encode()).decode("ascii")
+        heartbeat = make_heartbeat_entry(
+            job_address="successor",
+            blockhash="EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+            slot=435_000_000,
+            ts=1_785_144_000_123,
+            cycle=2,
+            signing_key=key,
+        )
+        calls = []
+
+        def request_get(**kwargs):
+            url = kwargs["url"]
+            calls.append(url)
+            if url.endswith("/endpoints"):
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "json": {"urls": {"service": {"url": "https://service.example"}}},
+                    "text": "",
+                }
+            if url == "https://service.example/":
+                return {"ok": True, "status": 200, "json": None, "text": "<html>ok</html>"}
+            if url.endswith("/statement.json"):
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "json": {"wallets": {"solana": payer}},
+                    "text": "",
+                }
+            if url.endswith("/heartbeats"):
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "json": None,
+                    "text": json.dumps(heartbeat) + "\n",
+                }
+            raise AssertionError(url)
+
+        receipt = verify_successor_service(
+            job={"address": "successor", "node": "node"},
+            payer=payer,
+            cid=CONFIDENTIAL_STUB_CID,
+            secret_bytes=bytes(Keypair.from_seed(bytes(range(32)))),
+            request_get=request_get,
+            now_ms=lambda: 1_785_144_000_123,
+        )
+        self.assertEqual(receipt["serviceUrl"], "https://service.example")
+        self.assertEqual(receipt["httpStatus"], {"/": 200, "/statement.json": 200, "/heartbeats": 200})
+        self.assertTrue(receipt["heartbeatVerified"])
+        self.assertEqual(len(calls), 4)
+
+    def test_successor_service_rejects_tampered_or_wrong_job_heartbeat(self):
+        key = SigningKey(bytes(range(32)))
+        payer = __import__("base58").b58encode(key.verify_key.encode()).decode("ascii")
+        heartbeat = make_heartbeat_entry(
+            job_address="wrong-job",
+            blockhash="EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+            slot=435_000_000,
+            ts=1_785_144_000_123,
+            cycle=1,
+            signing_key=key,
+        )
+
+        def request_get(**kwargs):
+            url = kwargs["url"]
+            if url.endswith("/endpoints"):
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "json": {"urls": {"service": {"url": "https://service.example"}}},
+                    "text": "",
+                }
+            if url.endswith("/heartbeats"):
+                return {"ok": True, "status": 200, "json": None, "text": json.dumps(heartbeat)}
+            return {
+                "ok": True,
+                "status": 200,
+                "json": {"wallets": {"solana": payer}} if url.endswith(".json") else None,
+                "text": "",
+            }
+
+        with self.assertRaisesRegex(RuntimeError, "heartbeat"):
+            verify_successor_service(
+                job={"address": "successor", "node": "node"},
+                payer=payer,
+                cid=CONFIDENTIAL_STUB_CID,
+                secret_bytes=bytes(Keypair.from_seed(bytes(range(32)))),
+                request_get=request_get,
+            )
 
     def test_submit_list_sends_once_and_requires_finalized_confirmation(self):
         calls = []
