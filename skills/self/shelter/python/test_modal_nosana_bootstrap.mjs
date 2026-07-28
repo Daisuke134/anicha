@@ -157,7 +157,13 @@ test("a later sandbox can reconcile the same job without a second list", async (
         jobAddress: "job-one",
         listSignature: null,
         listStatus: null,
-        delivery: { delivered: true, attempts: 1, httpStatus: 200 },
+        delivery: {
+          delivered: false,
+          reconciled: true,
+          attempts: 0,
+          httpStatus: 200,
+          serviceUrl: "https://service.example",
+        },
       })}\n`,
       returncode: 0,
     },
@@ -179,6 +185,7 @@ test("a later sandbox can reconcile the same job without a second list", async (
   assert.equal(result.ok, true);
   assert.equal(result.receipt.action, "recovered");
   assert.equal(result.receipt.jobAddress, "job-one");
+  assert.equal(result.receipt.delivery.reconciled, true);
 });
 
 

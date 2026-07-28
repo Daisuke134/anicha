@@ -23,6 +23,7 @@ from nosana_bootstrap import (
     evaluate_post_gate,
     prepare_ephemeral_key,
     parse_market_account,
+    reconcile_running_service,
     select_active_job,
     submit_list_job,
 )
@@ -293,6 +294,31 @@ class BootstrapBehaviorTests(unittest.TestCase):
                 now_ms=lambda: 1785144000123,
             )
 
+    def test_running_service_reconciliation_avoids_confidential_redelivery(self):
+        calls = []
+
+        def request_get(**kwargs):
+            calls.append(kwargs["url"])
+            if kwargs["url"].endswith("/endpoints"):
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "json": {"urls": {"service": {"url": "https://service.example"}}},
+                }
+            return {"ok": True, "status": 200, "json": None}
+
+        receipt = reconcile_running_service(
+            job={"address": "job", "node": "node"},
+            cid=CONFIDENTIAL_STUB_CID,
+            secret_bytes=bytes(Keypair.from_seed(bytes(range(32)))),
+            request_get=request_get,
+            now_ms=lambda: 1785144000123,
+        )
+        self.assertTrue(receipt["reconciled"])
+        self.assertFalse(receipt["delivered"])
+        self.assertEqual(receipt["serviceUrl"], "https://service.example")
+        self.assertEqual(len(calls), 2)
+
     def test_submit_list_sends_once_and_requires_finalized_confirmation(self):
         calls = []
         blockhash = "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
@@ -385,6 +411,7 @@ class BootstrapBehaviorTests(unittest.TestCase):
             rpc_impl=lambda method, params: (_ for _ in ()).throw(AssertionError(method)),
             get_json=get_json,
             request_impl=lambda **_: {"ok": True, "status": 200},
+            service_get_impl=lambda **_: {"ok": True, "status": 200, "json": {"urls": {}}},
             sleep=lambda _: None,
         )
         self.assertEqual(receipt["action"], "recovered")

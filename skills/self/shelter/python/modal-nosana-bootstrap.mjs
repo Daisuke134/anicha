@@ -194,9 +194,12 @@ function safeBootstrapReceipt(value, { sandboxId, market }) {
     || typeof value.jobAddress !== "string"
     || !value.jobAddress
     || !value.delivery
-    || value.delivery.delivered !== true
+    || (
+      value.delivery.delivered !== true
+      && value.delivery.reconciled !== true
+    )
     || !Number.isInteger(Number(value.delivery.attempts))
-    || Number(value.delivery.attempts) < 1
+    || Number(value.delivery.attempts) < 0
     || !Number.isInteger(Number(value.delivery.httpStatus))
   ) {
     throw new Error("bootstrap receipt is incomplete");
@@ -226,9 +229,14 @@ function safeBootstrapReceipt(value, { sandboxId, market }) {
     listSignature: value.listSignature ?? null,
     listStatus: value.listStatus ?? null,
     delivery: {
-      delivered: true,
+      delivered: value.delivery.delivered === true,
+      reconciled: value.delivery.reconciled === true,
       attempts: Number(value.delivery.attempts),
       httpStatus: Number(value.delivery.httpStatus),
+      serviceUrl:
+        typeof value.delivery.serviceUrl === "string"
+          ? value.delivery.serviceUrl
+          : null,
     },
   };
 }

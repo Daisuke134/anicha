@@ -281,6 +281,54 @@ def _requests_post(*, url: str, headers: dict, body: str, timeout: float) -> dic
     return {"ok": response.ok, "status": response.status_code}
 
 
+def _requests_get(*, url: str, headers: dict | None = None, timeout: float = 15) -> dict:
+    response = requests.get(url, headers=headers or {}, timeout=timeout)
+    payload = None
+    try:
+        payload = response.json()
+    except Exception:
+        pass
+    return {"ok": response.ok, "status": response.status_code, "json": payload}
+
+
+def reconcile_running_service(
+    *,
+    job: dict,
+    cid: str,
+    secret_bytes: bytes,
+    request_get=_requests_get,
+    now_ms=lambda: int(time.time() * 1000),
+) -> dict | None:
+    """Prove an already-delivered confidential service is publicly answering."""
+
+    address = job.get("address")
+    node = job.get("node")
+    if not address or not node:
+        return None
+    authorization = build_authorization(cid, secret_bytes, now_ms=now_ms())
+    endpoints = request_get(
+        url=f"https://{node}.{DEFAULT_NODE_DOMAIN}/job/{address}/endpoints",
+        headers={"Authorization": authorization},
+        timeout=15,
+    )
+    payload = endpoints.get("json") if isinstance(endpoints, dict) else None
+    urls = payload.get("urls", {}) if isinstance(payload, dict) else {}
+    for row in urls.values():
+        service_url = row.get("url") if isinstance(row, dict) else None
+        if not isinstance(service_url, str) or not service_url.startswith("https://"):
+            continue
+        probe = request_get(url=service_url, headers={}, timeout=15)
+        if probe.get("ok"):
+            return {
+                "delivered": False,
+                "reconciled": True,
+                "attempts": 0,
+                "httpStatus": int(probe.get("status", 0)),
+                "serviceUrl": service_url,
+            }
+    return None
+
+
 def submit_list_job(
     *,
     payer: Keypair,
@@ -537,6 +585,7 @@ def bootstrap_once(
     rpc_impl,
     get_json=_default_get_json,
     request_impl=None,
+    service_get_impl=_requests_get,
     sleep=time.sleep,
 ) -> dict:
     """Recover or list once, deliver once, and return an allowlisted receipt."""
@@ -591,14 +640,23 @@ def bootstrap_once(
     if claimed.get("payer") != str(payer.pubkey()) or claimed.get("market") != str(market):
         raise RuntimeError("claimed job readback does not bind the expected payer and market")
     definition = bind_job_address(definition, job_address)
-    delivery = deliver_definition_until_running(
-        job=claimed,
-        definition=definition,
-        cid=CONFIDENTIAL_STUB_CID,
-        secret_bytes=bytes(payer),
-        request_impl=request_impl,
-        sleep=sleep,
-    )
+    delivery = None
+    if action == "recovered":
+        delivery = reconcile_running_service(
+            job=claimed,
+            cid=CONFIDENTIAL_STUB_CID,
+            secret_bytes=bytes(payer),
+            request_get=service_get_impl,
+        )
+    if delivery is None:
+        delivery = deliver_definition_until_running(
+            job=claimed,
+            definition=definition,
+            cid=CONFIDENTIAL_STUB_CID,
+            secret_bytes=bytes(payer),
+            request_impl=request_impl,
+            sleep=sleep,
+        )
     return {
         "ok": True,
         "sandboxId": sandbox_id,
