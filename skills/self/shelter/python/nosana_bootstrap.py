@@ -636,7 +636,11 @@ if __name__ == "__main__":
     except Exception as error:
         print(
             json.dumps(
-                {"ok": False, "error": str(error)[:200]},
+                {
+                    "ok": False,
+                    "sandboxId": os.environ.get("MODAL_SANDBOX_ID", ""),
+                    "error": str(error)[:200],
+                },
                 separators=(",", ":"),
             ),
             flush=True,

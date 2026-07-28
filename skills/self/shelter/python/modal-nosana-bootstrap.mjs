@@ -162,7 +162,10 @@ function parseControlLine(stdout, kind) {
     throw new Error(`${kind} must return exactly one JSON control line`);
   }
   const [value] = controls;
-  if (!value || value.ok !== true) throw new Error(`${kind} reported failure`);
+  if (!value || value.ok !== true) {
+    const detail = typeof value?.error === "string" ? `: ${value.error.slice(0, 200)}` : "";
+    throw new Error(`${kind} reported failure${detail}`);
+  }
   return value;
 }
 
