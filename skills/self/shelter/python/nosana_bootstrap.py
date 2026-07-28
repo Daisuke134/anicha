@@ -412,8 +412,12 @@ def discover_active_job(
 ) -> dict | None:
     """Recover via indexer first, then recent payer transactions for queued-job gaps."""
 
+    indexer_read_succeeded = False
     try:
         payload = get_json(f"{jobs_api}?payer={payer}")
+        if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+            raise RuntimeError("payer jobs response has an invalid shape")
+        indexer_read_succeeded = True
         direct = select_active_job(payload.get("jobs", []), payer=payer, market=market)
         if direct:
             return direct
@@ -451,7 +455,15 @@ def discover_active_job(
                 and int(job.get("state", -1)) in (0, 1)
             ):
                 candidates.append(job)
-    return select_active_job(candidates, payer=payer, market=market)
+    recovered = select_active_job(candidates, payer=payer, market=market)
+    if recovered:
+        return recovered
+    if not indexer_read_succeeded:
+        raise RuntimeError(
+            "cannot prove that no active Nosana job exists while the payer index is unavailable; "
+            "refusing to list"
+        )
+    return None
 
 
 def wait_for_claimed_job(

@@ -17,6 +17,7 @@ from nosana_bootstrap import (
     bootstrap_once,
     decrypt_bootstrap_bundle,
     decode_confidential_stub_cid,
+    discover_active_job,
     deliver_definition_until_running,
     evaluate_post_gate,
     prepare_ephemeral_key,
@@ -173,6 +174,18 @@ class BootstrapBehaviorTests(unittest.TestCase):
         ]
         self.assertEqual(select_active_job(jobs, payer="payer", market=MARKET)["address"], "new")
         self.assertIsNone(select_active_job(jobs, payer="payer", market="another-market"))
+
+    def test_discovery_fails_closed_when_indexer_is_unavailable(self):
+        def unavailable(_url):
+            raise RuntimeError("temporary indexer outage")
+
+        with self.assertRaisesRegex(RuntimeError, "cannot prove"):
+            discover_active_job(
+                payer="payer",
+                market=MARKET,
+                get_json=unavailable,
+                rpc_impl=lambda method, params: [],
+            )
 
     def test_fixed_market_escrow_and_move_out_floor_gate(self):
         allowed = evaluate_post_gate(
