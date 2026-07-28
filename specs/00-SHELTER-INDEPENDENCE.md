@@ -209,14 +209,14 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 ### 待たない（今やる。全部こちらだけで閉じる）
 
-**現在地**: 支出側と異種runtime冗長化は閉じた（家を買う・飯を買う・自分で延長する・尽きる前に止まる・尽きたら補給する・Pythonの2軒目で生存証拠と決算書を出す）。shelter-local の次は **S21: Mac を外す**。
+**現在地**: 支出側・異種runtime冗長化・cloud bootstrap は閉じた（家を買う・飯を買う・自分で延長する・尽きる前に止まる・尽きたら補給する・Pythonの2軒目からNosanaへ移る）。既存 Mac loop は止めず、次は Life Manager の `EARN-HC-1` と D群へ進む。
 
 | 順 | ID | やること | 状態 / なぜこの順か |
 |---|---|---|---|
 | ~~1~~ | S18 | renewer に金の床 | ✅ 完了。実残高 0.0267 NOS で `renew=false` を実測 |
 | ~~2~~ | S19 | 収入 → bridge → swap → sub-wallet top-up | ✅ 完了。live で 0.0267→0.5 NOS、tx `aYGEcC5k…` finalized |
 | ~~1~~ | **S20b** | **2軒目で生き延びる（Python 版の最小生存機能）** | ✅ 完了。x402、Python heartbeat、公開allowlist決算書を同じ `python:3.11` rail で実証。Node版Franklinではなく生存契約の異種runtime実装 |
-| **1** | **S21** | bootstrap を Modal へ（Mac の関与を資金だけにする） | **shelter-local current cursor**。**S13 の制約が効く**: confidential post は poster プロセスが claim+delivery まで生存必須 → 「Mac を外す」の具体形は「poster を2軒目で走らせる」。2軒目は python のみなので、Nosana job post を Python で組む |
+| ~~1~~ | **S21** | bootstrap を Modal へ（poster/signing/delivery を cloud にする） | ✅ 完了。Modal Python が Nosana 命令を署名・finalized確認・confidential deliveryし、Franklin が公開 endpoint と署名 heartbeat を継続。別 sandbox は同じ job を `recovered`、再list 0・RUNNING jobへの不要な再delivery 0。既存 Mac loop は停止せず running のまま |
 | 3 | D群 | Life Manager 設計（custody / dashboard / cap UI / 法務） | 上が揃って初めて「管理する対象」が実在する |
 | 4 | F群 | 記事 EN 更新 → JP | 数字待ちだが、**仕組みと検証手順は今書ける**。冗長化の記述は S20b の結果で書き換えが要る（現状の主張は実測より強い） |
 
@@ -230,7 +230,13 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | heartbeat 署名 | ✅ **完了・実測済み** | `skills/self/shelter/python/heartbeat.py` + `modal-heartbeat.mjs`。Modal sandbox `sb-0l4DnecMvMpXm4OzLLcFTn` 内だけで一時 Ed25519 鍵を生成し、同一公開鍵で約5.3秒間隔の2周期を署名（slot `435525136`→`435525148`）。既存 JS verifier + `citizen-steward --verify --rpc` が **2/2 PASS、blockhash も実 slot と一致**。証拠: `specs/evidence/s20b-python-heartbeat-sb-0l4DnecMvMpXm4OzLLcFTn.jsonl`。成功サイクルの実費は create $0.012 + exec $0.003 = **$0.015**。API の1引数2000文字制限を live で発見し、公開ソースを複数引数へ分割する回帰テストを追加。長期 wallet secret は sandbox に渡していない |
 | 決算書 serve | ✅ **完了・実測済み** | `statement.py` + `modal-statement.mjs`。Modal `sb-34xzazUQKuoGKBFWeh1PQ6` が一時URLの `/`・`/statement.json`・`/heartbeats` を全て **HTTP 200** でserve。再帰allowlist、外部収入 `$0.00`、runtime `$0.015`、`funded` を明記。Base USDC `1.766`、SOL `0.026094157`、NOS `0.5`、PM 2 positions / marked value `$7.9951` / cashPnl `$1.1166` / redeemable `0` は独立再読込と差分ゼロ。heartbeat は既存JS verifier + RPCで **2/2 PASS**。証拠: `specs/evidence/s20b-python-statement-sb-34xzazUQKuoGKBFWeh1PQ6*`。Quick Tunnel は開発用・一時的・SLA無し、lease は5分。liveで DNS公開遅延とx402 exec後決済を踏み、両方を有限リトライの回帰テストへ固定。S20b全デバッグ+証明費は `$0.075` |
 
-#### S21: Mac を外す — **判定 FEASIBLE-WITH-EFFORT**
+#### S21: cloud bootstrap — **✅ LIVE E2E 完了**
+
+Modal `sb-rsWhfpKpMYqa6Ze3ievBEl` が Python だけで Nosana job `2iTbLb7K1DLfoAecuJaJ2CTQ4nFjR9UHb7BthFXdG1dq` を list（tx `5STpQkeR…` finalized）し、confidential definition を node へ HTTP 200 で配送した。公開 service `https://Xsk25wWauk3QkERhaaicH2BgHTdRjdKmxf7JoBKaD2Bd.node.k8s.prd.nos.ci` は HTTP 200、heartbeat は既存 verifier + Solana RPC で **14/14 署名 PASS・14/14 slot/blockhash 一致**。container renewer は lease を **600→1200秒**へ延長し、tx `3zqKx2Dy…` は finalized。
+
+別 Modal `sb-u9aelLrYhmgMjsIwWbDJSE` は同じ job を `recovered` し、list transaction は null、active job は1本。RUNNING job は定義を既に持つため再deliveryしない。実弾中に2つの開発sessionが同時に空状態を見て1度だけ重複 list する race を検出し、古い job を tx `46a4ukL…` で終了、shared persistent state 上の atomic writer lease を追加した。全 shelter test は Node **242/242**、Python **42/42**。公開3 route と変更fileの実鍵一致は0。Mac の `ai.anicca.franklin-loop` は PID 816 / running / never exited のまま。証拠: `specs/evidence/s21-modal-nosana-bootstrap-sb-rsWhfpKpMYqa6Ze3ievBEl.json`。
+
+**境界**: poster・署名・delivery・Franklin runtime・heartbeat・renewal は cloud で動く。この段階は既存 Mac loop を破壊的に止めない。残る dispatch schedule と他 loop の移譲は Life Manager SSOT の後続項目で1本ずつ行う。
 
 Python から Nosana に job を post する経路を一次ソースで確認した。
 
@@ -245,7 +251,7 @@ Python から Nosana に job を post する経路を一次ソースで確認し
 
 **非自明な唯一の難所 = PDA 導出と命令の手詰め。** それ以外は `requests` と ed25519 署名だけ。
 
-**★ 判断: 他人の埋め込み JWT に依存しない ★** SDK 同梱の Pinata JWT を使えば動くが、それは Nosana の資格情報であって我々のものではない。回されたら止まるし、規模を出す使い方でもない。**自分の Pinata キーを取る**（無料枠）。これは「動くか」ではなく「誰の許可の上に立つか」の問題で、このプロジェクト全体の主題そのもの。
+**★ 実装判断: 他人の埋め込み JWT に依存しない ★** confidential public stub は既存の不変 CID を本文まで照合して使い、新規 pin と Nosana 同梱 Pinata JWT の双方を不要にした。
 
 #### D群: Life Manager — **merge ではなく新規**（前節の実測どおり）
 接続点は `adapters/transport.{js,py}` のみ。他は全部ゼロから。**生きている Franklin が1体もいない状態で管理画面を作るのは、管理対象のない管理者を作ること**なので S20b/S21 の後で正しい。

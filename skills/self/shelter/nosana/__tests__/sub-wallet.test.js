@@ -16,6 +16,11 @@ import {
   DEFAULT_SOL_CAP,
 } from "../sub-wallet.mjs";
 
+test("default NOS cap can fund one fixed escrow while preserving the move-out reserve", () => {
+  assert.equal(DEFAULT_NOS_CAP, 0.75);
+  assert.ok(DEFAULT_NOS_CAP >= 0.3456 + 0.34);
+});
+
 const BASE = {
   requestNos: 0.2,
   requestSol: 0.004,
@@ -38,7 +43,7 @@ test("funding gate: refuses non-positive and non-finite requests", () => {
 });
 
 test("funding gate: refuses when sub-wallet would exceed NOS cap (existing balance counts)", () => {
-  const verdict = evaluateFundingGate({ ...BASE, subNosBalance: 0.4, requestNos: 0.2 });
+  const verdict = evaluateFundingGate({ ...BASE, subNosBalance: 0.65, requestNos: 0.2 });
   assert.equal(verdict.allowed, false);
   assert.match(verdict.reason, /NOS cap/);
 });
@@ -63,7 +68,7 @@ test("funding gate: refuses when owner lacks the NOS being sent", () => {
 test("funding gate: custom caps via config override defaults", () => {
   const verdict = evaluateFundingGate({ ...BASE, requestNos: 0.9, config: { nosCap: 1.0, solCap: DEFAULT_SOL_CAP } });
   assert.equal(verdict.allowed, true, verdict.reason);
-  assert.equal(evaluateFundingGate({ ...BASE, requestNos: 0.9 }).allowed, false); // default cap 0.5 refuses the same request
+  assert.equal(evaluateFundingGate({ ...BASE, requestNos: 0.9 }).allowed, false); // default 0.75 cap refuses the same request
 });
 
 test("materializeSubWalletFile: 0600 file in 0700 dir", () => {

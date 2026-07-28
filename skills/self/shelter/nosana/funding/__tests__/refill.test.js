@@ -9,6 +9,20 @@ import {
   DEFAULT_KEEP_ON_BASE_USD,
 } from "../refill.mjs";
 
+test("default refill target covers one fixed escrow plus the move-out reserve", () => {
+  assert.equal(DEFAULT_SUBWALLET_TARGET_NOS, 0.75);
+  assert.ok(DEFAULT_SUBWALLET_TARGET_NOS >= 0.3456 + 0.34);
+});
+
+test("default shelter target covers one fixed market escrow plus the move-out reserve", () => {
+  const liveMarketEscrowNos = 48 * 7200 / 1_000_000;
+  const moveOutReserveNos = 0.34;
+  assert.ok(
+    DEFAULT_SUBWALLET_TARGET_NOS >= liveMarketEscrowNos + moveOutReserveNos,
+    `${DEFAULT_SUBWALLET_TARGET_NOS} NOS cannot cover ${liveMarketEscrowNos} escrow + ${moveOutReserveNos} reserve`,
+  );
+});
+
 // ---------------------------------------------------------------------------------------------
 // planRefill — targets the SUB-WALLET (the wallet that actually pays rent), not the treasury.
 // ---------------------------------------------------------------------------------------------
@@ -99,7 +113,7 @@ test("given a stocked treasury and a starving sub-wallet, the plan tops up and d
   const p = planRefill({
     subNosBalance: 0.0267, // measured: cannot afford a single 10-minute lease (0.0302 NOS)
     subSolBalance: DEFAULT_SUBWALLET_TARGET_SOL, // fine
-    ownerNosBalance: 0.607425, // measured: sitting in the treasury, never reaching the spender
+    ownerNosBalance: 0.8, // stocked treasury can cover the larger safe shelter target
     ownerSolBalance: 1, // plenty
     baseUsdc: 50, // Base has revenue too, but it must not be touched for this
   });
@@ -181,6 +195,40 @@ test("executeRefill accepts a rail that reports success as `sent` rather than `o
     topUpSubWallet: async () => ({ sent: true, signatures: { nos: "sig" } }),
   });
   assert.equal(r.ok, true);
+});
+
+test("executeRefill accepts acquireNos settled shape with a signature", async () => {
+  const calls = [];
+  const r = await executeRefill({
+    plan: { act: true, bridgeUsd: 0, swapNeeded: true, topUpNos: 0.25, topUpSol: 0, reason: "short" },
+    swapToNos: async () => ({
+      posted: true,
+      signature: "settled-solana-signature",
+      nosReceived: 2.9,
+    }),
+    topUpSubWallet: async () => {
+      calls.push("topup");
+      return { sent: true, signatures: { nos: "topup-signature" } };
+    },
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(calls, ["topup"]);
+});
+
+test("executeRefill treats an unknown swap result as indeterminate and never tops up", async () => {
+  let toppedUp = false;
+  const r = await executeRefill({
+    plan: { act: true, bridgeUsd: 0, swapNeeded: true, topUpNos: 0.25, topUpSol: 0, reason: "short" },
+    swapToNos: async () => ({ something: "unexpected" }),
+    topUpSubWallet: async () => {
+      toppedUp = true;
+      return { sent: true };
+    },
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.indeterminate, true);
+  assert.equal(toppedUp, false);
+  assert.match(r.reason, /MAY have gone through/);
 });
 
 test("an unreadable top-up result is indeterminate, never a plain failure", async () => {

@@ -207,11 +207,28 @@ export async function executeRefill({ plan, bridge, swapToNos, topUpSubWallet })
   let swapResult = null;
   if (plan.swapNeeded) {
     swapResult = await swapToNos();
-    if (!swapResult || swapResult.ok !== true) {
+    // acquireNos returns a reconciled settlement as {posted:true, signature, nosReceived};
+    // it does not use an `ok` field. A signature alone is not enough unless the rail also says it
+    // posted, while an unreadable shape is indeterminate because funds may already have moved.
+    const swapped = swapResult && (
+      swapResult.ok
+      ?? (
+        swapResult.posted === true
+        && typeof swapResult.signature === "string"
+        && swapResult.signature.length > 0
+      )
+    );
+    if (swapped !== true) {
+      const indeterminate = Boolean(swapResult)
+        && swapResult.ok === undefined
+        && swapResult.posted === undefined;
       return {
         ok: false,
+        indeterminate,
         skipped: false,
-        reason: `swap failed: ${(swapResult && swapResult.reason) || "unknown"}`,
+        reason: indeterminate
+          ? "swap result is unreadable — the swap MAY have gone through. Check the chain before retrying; do not swap blind."
+          : `swap failed: ${(swapResult && swapResult.reason) || "no reason given"}`,
         bridge: bridgeResult,
         swap: swapResult,
         topUp: null,
