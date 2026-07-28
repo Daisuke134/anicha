@@ -577,6 +577,8 @@ def bootstrap_once(
         "ok": True,
         "sandboxId": sandbox_id,
         "action": action,
+        "recovered": action == "recovered",
+        "listed": action == "listed",
         "payer": str(payer.pubkey()),
         "market": str(market),
         "jobAddress": job_address,

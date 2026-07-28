@@ -42,7 +42,7 @@ export function assessHabitation({ created, execs }) {
 }
 
 /** Build a fetch that settles x402 from the agent's own key. Never logs key material. */
-async function payingFetch(baseKey) {
+export async function payingFetch(baseKey) {
   const { wrapFetchWithPaymentFromConfig } = await import('@x402/fetch');
   const { ExactEvmScheme } = await import('@x402/evm/exact/client');
   const { privateKeyToAccount } = await import('viem/accounts');
@@ -52,7 +52,7 @@ async function payingFetch(baseKey) {
   });
 }
 
-async function post(doFetch, path, body) {
+export async function postModal(doFetch, path, body) {
   const res = await doFetch(`${MODAL_BASE}/${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -90,14 +90,14 @@ export async function moveIn({
 
   const doFetch = fetchImpl || (await payingFetch(baseKey));
   const createBody = { image, timeout: timeoutSec, ...(gpu ? { gpu } : {}) };
-  const created = await post(doFetch, 'sandbox/create', createBody);
+  const created = await postModal(doFetch, 'sandbox/create', createBody);
   if (!created.ok || !created.json.sandbox_id) {
     return { ok: false, reason: `the landlord refused: HTTP ${created.status}`, detail: created.json };
   }
 
   const execs = [];
   for (const command of commands) {
-    const r = await post(doFetch, 'sandbox/exec', { sandbox_id: created.json.sandbox_id, command });
+    const r = await postModal(doFetch, 'sandbox/exec', { sandbox_id: created.json.sandbox_id, command });
     const stdout = r.json.stdout ?? r.json.output ?? r.json.result ?? '';
     execs.push({ ok: r.ok, status: r.status, command, stdout: String(stdout), stderr: String(r.json.stderr ?? ''), detail: r.ok ? undefined : r.json });
     if (!r.ok) break;

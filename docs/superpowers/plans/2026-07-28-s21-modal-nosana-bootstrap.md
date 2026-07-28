@@ -83,10 +83,10 @@
 - `buildBootstrapCommand({ciphertextChunks}) -> string[]`
 - `bootstrapNosanaFromModal(...) -> safe receipt`
 
-- [ ] Write RED tests for two-exec order, 2,000-character command parts, pinned dependencies, no plaintext secret in either command, sandbox-ID binding, allowlisted output, and restart recovery.
-- [ ] Package only public Python source in exec 1; encrypt secrets after its public key returns.
-- [ ] Reuse `moveIn`'s paying fetch while extending it with an explicit same-sandbox exec helper; cap at create + two execs.
-- [ ] Run Node/Python/shelter regression suites GREEN and commit.
+- [x] Write RED tests for two-exec order, 2,000-character command parts, pinned dependencies, no plaintext secret in either command, sandbox-ID binding, allowlisted output, and restart recovery.
+- [x] Package only public Python source in exec 1; encrypt secrets after its public key returns.
+- [x] Reuse `moveIn`'s paying fetch while extending it with an explicit same-sandbox exec helper; cap at create + two execs.
+- [x] Run Node/Python/shelter regression suites GREEN and commit.
 
 ### Task 4: Live proof and Mac cutover
 
