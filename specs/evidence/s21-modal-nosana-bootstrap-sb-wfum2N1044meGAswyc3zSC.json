@@ -63,7 +63,7 @@
   },
   "tests": {
     "python": {"passed": 50, "failed": 0},
-    "nodeFocused": {"passed": 6, "failed": 0},
-    "nodeShelterFull": {"passed": 242, "failed": 0}
+    "nodeFocused": {"passed": 7, "failed": 0},
+    "nodeShelterFull": {"passed": 243, "failed": 0}
   }
 }

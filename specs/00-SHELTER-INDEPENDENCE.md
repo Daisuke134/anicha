@@ -263,6 +263,7 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 |---|---|
 | Modalは2 execで足りる | claimが同期execの約60秒より長い。prepare → background bootstrap → collect の**3 exec**へ変更 |
 | indexer障害は「jobなし」と同じ | 一時障害でduplicate listを1件作った。探索不能時は**fail closed**に変更し、emptyを証明できた時だけlist |
+| 同時bootstrapはAPI照合だけで防げる | 2 processが同じempty snapshotを見るraceをliveで検出。shared persistent stateのatomic writer leaseを追加 |
 | 決算書のruntime costはModal固定 `$0.015` でよい | Nosana上では誤り。live job APIから動的算出し、旧jobを停止・返金後に修正版を再配置 |
 
 Python から Nosana に job を post する経路を一次ソースで確認した。

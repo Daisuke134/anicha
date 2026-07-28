@@ -88,7 +88,7 @@
 - [x] Reuse `moveIn`'s paying fetch while extending it with an explicit same-sandbox exec helper; use create + prepare + background-bootstrap + receipt collection because the live claim window exceeds one synchronous exec.
 - [x] Run Node/Python/shelter regression suites GREEN and commit.
 
-### Task 4: Live proof and Mac cutover
+### Task 4: Live Mac-off proof
 
 **Files:**
 - Create: `specs/evidence/s21-modal-nosana-bootstrap-<sandbox-id>.json`

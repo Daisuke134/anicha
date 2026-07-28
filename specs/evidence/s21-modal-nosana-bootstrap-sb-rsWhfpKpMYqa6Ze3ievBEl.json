@@ -1,0 +1,112 @@
+{
+  "ok": true,
+  "branchHead": "6a2cd47",
+  "initialBootstrap": {
+    "sandboxId": "sb-rsWhfpKpMYqa6Ze3ievBEl",
+    "action": "listed",
+    "providerHttpStatuses": {
+      "create": 200,
+      "prepareExec": 200,
+      "bootstrapExec": 200
+    },
+    "jobAddress": "2iTbLb7K1DLfoAecuJaJ2CTQ4nFjR9UHb7BthFXdG1dq",
+    "payer": "71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf",
+    "market": "7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq",
+    "listSignature": "5STpQkeRDczddGdsJfikZPuCh3gxHFKxJN4UfYh9DCtRvWhD2fFnx54VUZKhPdjgXpcy6TwDgXHMUt93kgwcHMiz",
+    "listStatus": "finalized",
+    "confidentialDelivery": {
+      "delivered": true,
+      "attempts": 1,
+      "httpStatus": 200
+    }
+  },
+  "recoveryBootstrap": {
+    "sandboxId": "sb-u9aelLrYhmgMjsIwWbDJSE",
+    "action": "recovered",
+    "providerHttpStatuses": {
+      "create": 200,
+      "prepareExec": 200,
+      "bootstrapExec": 200
+    },
+    "jobAddress": "2iTbLb7K1DLfoAecuJaJ2CTQ4nFjR9UHb7BthFXdG1dq",
+    "listSignature": null,
+    "listStatus": null,
+    "delivery": {
+      "delivered": false,
+      "attempts": 0,
+      "httpStatus": null,
+      "alreadyRunning": true
+    }
+  },
+  "service": {
+    "url": "https://Xsk25wWauk3QkERhaaicH2BgHTdRjdKmxf7JoBKaD2Bd.node.k8s.prd.nos.ci",
+    "rootHttpStatus": 200,
+    "heartbeatHttpStatus": 200,
+    "heartbeatCountAtVerification": 14,
+    "heartbeatSignaturePass": 14,
+    "heartbeatRpcBlockhashPass": 14
+  },
+  "renewal": {
+    "timeoutBeforeSeconds": 600,
+    "timeoutAfterSeconds": 1200,
+    "signature": "3zqKx2Dy1cwqpeToJTZ9PJWBjYybj45aj892MKw8q6SoKrQAEw3Xu3RP8ZF9z5oP3CggYQrjL6fJxZk8XdkSDJKy",
+    "confirmationStatus": "finalized",
+    "error": null
+  },
+  "concurrencyIncidentAndFix": {
+    "observedDuplicateJob": "5DY4S2A7e7GF2EzhHZkqy4n2NJHc5V18HfjeRrrxBJQh",
+    "cause": "two developer sessions observed the empty indexer state and listed concurrently",
+    "cleanupEndSignature": "46a4ukL5MAX3XxNbRkAMQeZVgRdwFSjtfqrCAFKhX8nr8NKucLvhggcs6fTXFK39PBShvXPbMxga2rpHKZXqy3UV",
+    "activeJobsAfterCleanup": [
+      "2iTbLb7K1DLfoAecuJaJ2CTQ4nFjR9UHb7BthFXdG1dq"
+    ],
+    "activeJobCountAfterCleanup": 1,
+    "prevention": "atomic O_EXCL writer lease on the shared persistent state volume",
+    "preventionCommit": "cfaa937"
+  },
+  "publicConfidentialStub": {
+    "cid": "QmYBbVdWFgfoTEdPT7mnaXJz6zQzfKb1Pts4A5B9kDMBph",
+    "containsOps": false
+  },
+  "balancesAfterProof": {
+    "shelterNos": 0.75,
+    "shelterSol": 0.020926597,
+    "baseUsdc": 0.913,
+    "refillRequired": false
+  },
+  "macLoop": {
+    "label": "ai.anicca.franklin-loop",
+    "state": "running",
+    "pid": 816,
+    "lastExit": "never exited",
+    "stoppedOrUnloadedByS21": false
+  },
+  "verification": {
+    "nodeShelterTests": {
+      "passed": 242,
+      "failed": 0
+    },
+    "pythonShelterTests": {
+      "passed": 42,
+      "failed": 0
+    },
+    "publicRoutesContainScopedSecret": false,
+    "changedFilesContainScopedSecret": false,
+    "writerLeaseReleased": true
+  },
+  "sources": [
+    {
+      "name": "Nosana list instruction",
+      "url": "https://github.com/nosana-ci/nosana-programs/blob/main/programs/nosana-jobs/src/instructions/list.rs"
+    },
+    {
+      "name": "Nosana CLI confidential post action",
+      "url": "https://github.com/nosana-ci/nosana-cli/blob/main/src/cli/job/post/action.ts"
+    },
+    {
+      "name": "Modal Sandboxes",
+      "url": "https://modal.com/docs/guide/sandboxes"
+    }
+  ],
+  "boundary": "The poster, signer, confidential delivery, Franklin runtime, heartbeat, and renewer execute in cloud sandboxes. This proof intentionally keeps the existing Mac launchd loop running; later migration items move the remaining dispatch schedule and other loops without a destructive cutover."
+}

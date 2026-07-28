@@ -722,6 +722,13 @@ def bootstrap_once(
             secret_bytes=bytes(payer),
             request_get=service_get_impl,
         )
+        if delivery is None and existing and int(existing.get("state", -1)) == 1:
+            delivery = {
+                "delivered": False,
+                "attempts": 0,
+                "httpStatus": None,
+                "alreadyRunning": True,
+            }
     if delivery is None:
         delivery = deliver_definition_until_running(
             job=claimed,
