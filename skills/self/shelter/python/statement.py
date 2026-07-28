@@ -391,7 +391,7 @@ def serve_statement(*, statement_file, heartbeats_file, port):
         heartbeat_jsonl,
         statement_provider=current_statement,
     )
-    server = ThreadingHTTPServer(("127.0.0.1", int(port)), handler)
+    server = ThreadingHTTPServer(("0.0.0.0", int(port)), handler)
     server.serve_forever()
 
 

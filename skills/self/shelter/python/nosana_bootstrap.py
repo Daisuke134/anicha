@@ -42,6 +42,7 @@ DEFAULT_NODE_DOMAIN = "node.k8s.prd.nos.ci"
 DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com"
 DEFAULT_JOBS_API = "https://dashboard.k8s.prd.nos.ci/api/jobs"
 MARKET_DISCRIMINATOR = bytes.fromhex("c94ebbe1f0c6c9fb")
+JOB_ADDRESS_PLACEHOLDER = "__NOSANA_JOB_ADDRESS__"
 
 
 def decode_confidential_stub_cid(cid: str) -> bytes:
@@ -146,6 +147,18 @@ def select_active_job(jobs: list[dict], *, payer: str, market: str) -> dict | No
     if not eligible:
         return None
     return max(eligible, key=lambda job: (int(job.get("timeStart") or 0), job["address"]))
+
+
+def bind_job_address(value, job_address: str):
+    """Replace only the explicit confidential-definition placeholder."""
+
+    if value == JOB_ADDRESS_PLACEHOLDER:
+        return job_address
+    if isinstance(value, list):
+        return [bind_job_address(item, job_address) for item in value]
+    if isinstance(value, dict):
+        return {key: bind_job_address(item, job_address) for key, item in value.items()}
+    return value
 
 
 def evaluate_post_gate(
@@ -577,6 +590,7 @@ def bootstrap_once(
     )
     if claimed.get("payer") != str(payer.pubkey()) or claimed.get("market") != str(market):
         raise RuntimeError("claimed job readback does not bind the expected payer and market")
+    definition = bind_job_address(definition, job_address)
     delivery = deliver_definition_until_running(
         job=claimed,
         definition=definition,

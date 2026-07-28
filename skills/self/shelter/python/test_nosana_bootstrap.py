@@ -13,6 +13,7 @@ from nosana_bootstrap import (
     CONFIDENTIAL_STUB_CID,
     JOBS_PROGRAM,
     build_authorization,
+    bind_job_address,
     build_list_instruction,
     bootstrap_once,
     decrypt_bootstrap_bundle,
@@ -174,6 +175,20 @@ class BootstrapBehaviorTests(unittest.TestCase):
         ]
         self.assertEqual(select_active_job(jobs, payer="payer", market=MARKET)["address"], "new")
         self.assertIsNone(select_active_job(jobs, payer="payer", market="another-market"))
+
+    def test_job_address_placeholder_is_bound_only_after_reconciliation(self):
+        original = {
+            "ops": [{"args": {"env": {
+                "NOSANA_JOB_ADDRESS": "__NOSANA_JOB_ADDRESS__",
+                "OTHER": "prefix-__NOSANA_JOB_ADDRESS__",
+            }}}],
+        }
+        bound = bind_job_address(original, "job-real")
+        self.assertEqual(bound["ops"][0]["args"]["env"]["NOSANA_JOB_ADDRESS"], "job-real")
+        self.assertEqual(
+            bound["ops"][0]["args"]["env"]["OTHER"],
+            "prefix-__NOSANA_JOB_ADDRESS__",
+        )
 
     def test_discovery_fails_closed_when_indexer_is_unavailable(self):
         def unavailable(_url):
