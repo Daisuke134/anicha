@@ -217,6 +217,7 @@ class StatementRoutes(unittest.TestCase):
             self.statement,
             self.heartbeat_jsonl,
             statement_provider=lambda: self.current_statement,
+            heartbeat_provider=lambda: self.heartbeat_jsonl,
         )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -267,6 +268,11 @@ class StatementRoutes(unittest.TestCase):
 
         self.assertEqual(json.loads(statement_json)["balances"]["baseUsdc"], 1.811)
         self.assertIn(b"$1.811000", html)
+
+    def test_heartbeat_route_reads_current_rows_at_request_time(self):
+        self.heartbeat_jsonl += '{"v":1,"kind":"shelter-heartbeat","cycle":3}\\n'
+        _, _, heartbeats = self.fetch("/heartbeats")
+        self.assertEqual(heartbeats, self.heartbeat_jsonl.encode("utf-8"))
 
 
 class FakeProcess:

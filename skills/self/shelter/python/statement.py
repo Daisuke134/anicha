@@ -328,16 +328,23 @@ public snapshot is at <code>/statement.json</code>.</p>
 """
 
 
-def make_statement_handler(statement, heartbeat_jsonl, statement_provider=None):
+def make_statement_handler(
+    statement,
+    heartbeat_jsonl,
+    statement_provider=None,
+    heartbeat_provider=None,
+):
     statement = allowlist_public_statement(statement)
     if statement_provider is None:
         statement_provider = lambda: statement
-    heartbeat_body = heartbeat_jsonl.encode("utf-8")
+    if heartbeat_provider is None:
+        heartbeat_provider = lambda: heartbeat_jsonl
 
     class StatementHandler(BaseHTTPRequestHandler):
         def _respond(self, include_body):
             if self.path == "/heartbeats":
-                content_type, body = "application/x-ndjson; charset=utf-8", heartbeat_body
+                content_type = "application/x-ndjson; charset=utf-8"
+                body = heartbeat_provider().encode("utf-8")
             elif self.path in ("/", "/statement.json"):
                 current = allowlist_public_statement(statement_provider())
                 if self.path == "/":
@@ -372,10 +379,16 @@ def make_statement_handler(statement, heartbeat_jsonl, statement_provider=None):
 
 def serve_statement(*, statement_file, heartbeats_file, port):
     statement = json.loads(Path(statement_file).read_text(encoding="utf-8"))
-    heartbeat_jsonl = Path(heartbeats_file).read_text(encoding="utf-8")
-    claimed = statement["heartbeats"]["claimed"]
-    verified = statement["heartbeats"]["verified"]
-    heartbeat_rows = [{"verified": index < verified} for index in range(claimed)]
+    heartbeat_path = Path(heartbeats_file)
+
+    def current_heartbeat_rows():
+        rows = []
+        for line in heartbeat_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            rows.append({**row, "verified": _verify_heartbeat_row(row)})
+        return rows
 
     def current_statement():
         return build_public_statement(
@@ -383,13 +396,14 @@ def serve_statement(*, statement_file, heartbeats_file, port):
             base_address=statement["wallets"]["base"],
             solana_address=statement["wallets"]["solana"],
             polymarket_address=statement["wallets"]["polymarket"],
-            heartbeats=heartbeat_rows,
+            heartbeats=current_heartbeat_rows(),
         )
 
     handler = make_statement_handler(
         statement,
-        heartbeat_jsonl,
+        heartbeat_path.read_text(encoding="utf-8"),
         statement_provider=current_statement,
+        heartbeat_provider=lambda: heartbeat_path.read_text(encoding="utf-8"),
     )
     server = ThreadingHTTPServer(("0.0.0.0", int(port)), handler)
     server.serve_forever()
