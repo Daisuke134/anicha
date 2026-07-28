@@ -88,18 +88,18 @@
 - [x] Reuse `moveIn`'s paying fetch while extending it with an explicit same-sandbox exec helper; cap at create + two execs.
 - [x] Run Node/Python/shelter regression suites GREEN and commit.
 
-### Task 4: Live proof and Mac cutover
+### Task 4: Live proof without destructive Mac cutover
 
 **Files:**
 - Create: `specs/evidence/s21-modal-nosana-bootstrap-<sandbox-id>.json`
 - Modify: `specs/00-SHELTER-INDEPENDENCE.md`
 - Modify after anicha push: `/Users/anicca/Projects/life-manager-main/docs/superpowers/specs/2026-07-19-anicca-one-repo-consolidation-spec.md`
 
-- [ ] Fresh-read sub-wallet SOL/NOS/Base balances; use the existing S19 refill rail only if the fixed escrow plus move-out reserve is not funded.
-- [ ] Run one paid Modal bootstrap. Require create/exec receipts, list signature `finalized`, Nosana job readback, confidential delivery 2xx, and public IPFS body equal only to the stub.
-- [ ] Fetch the Nosana service statement and at least two signed heartbeats; verify signatures and Solana slots independently.
-- [ ] Keep `ai.anicca.franklin-loop` loaded; prove the cloud job owns the writer lease, the Mac emits no duplicate cloud writes, and the same cloud job continues heartbeats and serves the statement.
-- [ ] Run a second paid Modal bootstrap after the first sandbox is gone. Require recovery of the same job, zero second list transaction, and successful re-delivery/reconciliation.
-- [ ] Observe one in-container lease extension and independently verify its transaction plus increased timeout.
-- [ ] Run secret-pattern scans, all test suites, `git diff --check`, and fresh provider/API/RPC readbacks.
+- [x] Fresh-read sub-wallet SOL/NOS/Base balances; use the existing S19 refill rail only if the fixed escrow plus move-out reserve is not funded.
+- [x] Run one paid Modal bootstrap. Require create/exec receipts, list signature `finalized`, Nosana job readback, confidential delivery 2xx, and public IPFS body equal only to the stub.
+- [x] Fetch the Nosana service statement and at least two signed heartbeats; verify signatures and Solana slots independently.
+- [x] Keep `ai.anicca.franklin-loop` loaded; prove the cloud job owns the writer lease, the Mac emits no duplicate cloud writes, and the same cloud job continues heartbeats and serves the statement.
+- [x] Run a second paid Modal bootstrap after the first sandbox is gone. Require recovery of the same job, zero second list transaction, and no re-delivery when the recovered job is already RUNNING.
+- [x] Observe one in-container lease extension and independently verify its transaction plus increased timeout.
+- [x] Run secret-pattern scans, all test suites, `git diff --check`, and fresh provider/API/RPC readbacks.
 - [ ] Mark S21 complete in both SSOTs, advance the cursor to `EARN-HC-1`, commit task-owned files, and push both repositories.
