@@ -26,7 +26,10 @@ import { DEFAULT_SOL_FEE_FLOOR } from "./spend-gate.mjs";
 import { appendChild } from "../../spawn/lib/ledger.js";
 import { resolveStateDir } from "../../spawn/lib/state-path.js";
 
-export const DEFAULT_NOS_CAP = 0.5; // ~$0.13 at $0.26/NOS — several 15-min leases, nothing more
+// One current fixed market escrow (48 microunits/s × 7200s = 0.3456 NOS) plus the
+// 0.34 NOS move-out reserve requires 0.6856 NOS before a safe post. 0.75 keeps
+// a small rate-change margin while retaining a tightly bounded cloud-key exposure.
+export const DEFAULT_NOS_CAP = 0.75;
 export const DEFAULT_SOL_CAP = 0.005; // fee + rent budget for the cloud key
 export const DEFAULT_USDC_CAP = 0.03; // BlockRun x402 budget (~2 gpt-5-mini calls at $0.011 each)
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
