@@ -65,11 +65,11 @@
 - `deliver_definition_until_running(...) -> delivery receipt`
 - CLI modes: `prepare-key`, `bootstrap`
 
-- [ ] Write RED tests proving active-job recovery sends no transaction, empty state sends one transaction, unknown confirmation never retries, fixed escrow/reserve enforcement, bounded delivery retry, and payer/job/market readback validation.
-- [ ] Implement sealed-box key generation/decryption with 0600 sandbox files and output allowlisting.
-- [ ] Implement Solana RPC transaction submission/confirmation and Nosana API reconciliation.
-- [ ] Implement official authorization header and 5-second confidential delivery retry.
-- [ ] Run the full Python shelter suite GREEN and commit.
+- [x] Write RED tests proving active-job recovery sends no transaction, empty state sends one transaction, unknown confirmation never retries, fixed escrow/reserve enforcement, bounded delivery retry, and payer/job/market readback validation.
+- [x] Implement sealed-box key generation/decryption with 0600 sandbox files and output allowlisting.
+- [x] Implement Solana RPC transaction submission/confirmation and Nosana API reconciliation.
+- [x] Implement official authorization header and 5-second confidential delivery retry.
+- [x] Run the full Python shelter suite GREEN and commit.
 
 ### Task 3: Add the paid Modal adapter
 

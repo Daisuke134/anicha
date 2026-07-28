@@ -14,11 +14,13 @@ from nosana_bootstrap import (
     JOBS_PROGRAM,
     build_authorization,
     build_list_instruction,
+    bootstrap_once,
     decrypt_bootstrap_bundle,
     decode_confidential_stub_cid,
     deliver_definition_until_running,
     evaluate_post_gate,
     prepare_ephemeral_key,
+    parse_market_account,
     select_active_job,
     submit_list_job,
 )
@@ -135,6 +137,33 @@ class NosanaInstructionTests(unittest.TestCase):
 
 
 class BootstrapBehaviorTests(unittest.TestCase):
+    @staticmethod
+    def _stub():
+        return {
+            "version": "0.1",
+            "type": "container",
+            "meta": {"trigger": "cli"},
+            "logistics": {
+                "send": {"type": "api-listen", "args": {}},
+                "receive": {"type": "api-listen", "args": {}},
+            },
+            "ops": [],
+        }
+
+    @staticmethod
+    def _bundle():
+        payer = Keypair.from_seed(bytes(range(32)))
+        return {
+            "solanaSecret": str(payer),
+            "market": MARKET,
+            "timeoutSec": 600,
+            "definition": {
+                "version": "0.1",
+                "type": "container",
+                "ops": [{"type": "container/run", "id": "run", "args": {"image": "image"}}],
+            },
+        }
+
     def test_active_job_recovery_is_deterministic_and_requires_same_payer_market(self):
         jobs = [
             {"address": "old", "payer": "payer", "market": MARKET, "state": 1, "timeStart": 10},
@@ -285,6 +314,120 @@ class BootstrapBehaviorTests(unittest.TestCase):
                 confirmation_attempts=2,
                 sleep=lambda _: None,
             )
+        self.assertEqual(calls.count("sendTransaction"), 1)
+
+    def test_market_account_prefix_matches_live_official_sdk_values(self):
+        raw = bytearray(64)
+        raw[:8] = bytes.fromhex("c94ebbe1f0c6c9fb")
+        struct.pack_into("<q", raw, 40, 86400)
+        struct.pack_into("<Q", raw, 48, 48)
+        struct.pack_into("<q", raw, 56, 7200)
+        self.assertEqual(
+            parse_market_account(bytes(raw)),
+            {
+                "jobExpirationSec": 86400,
+                "jobPriceMicrounitsPerSec": 48,
+                "jobTimeoutSec": 7200,
+            },
+        )
+
+    def test_bootstrap_recovers_running_job_without_send_transaction(self):
+        payer = str(Keypair.from_seed(bytes(range(32))).pubkey())
+        active = {
+            "address": "job-active",
+            "payer": payer,
+            "market": MARKET,
+            "state": 1,
+            "timeStart": 100,
+            "node": "node",
+        }
+
+        def get_json(url):
+            if "/ipfs/" in url:
+                return self._stub()
+            if "?payer=" in url:
+                return {"jobs": [active]}
+            if url.endswith("/job-active"):
+                return active
+            raise AssertionError(url)
+
+        receipt = bootstrap_once(
+            bundle=self._bundle(),
+            sandbox_id="sb-recovery",
+            rpc_impl=lambda method, params: (_ for _ in ()).throw(AssertionError(method)),
+            get_json=get_json,
+            request_impl=lambda **_: {"ok": True, "status": 200},
+            sleep=lambda _: None,
+        )
+        self.assertEqual(receipt["action"], "recovered")
+        self.assertIsNone(receipt["listSignature"])
+        self.assertEqual(receipt["jobAddress"], "job-active")
+
+    def test_bootstrap_empty_state_lists_exactly_once(self):
+        payer = str(Keypair.from_seed(bytes(range(32))).pubkey())
+        raw = bytearray(64)
+        raw[:8] = bytes.fromhex("c94ebbe1f0c6c9fb")
+        struct.pack_into("<q", raw, 40, 86400)
+        struct.pack_into("<Q", raw, 48, 48)
+        struct.pack_into("<q", raw, 56, 7200)
+        calls = []
+
+        def rpc(method, params):
+            calls.append(method)
+            if method == "getSignaturesForAddress":
+                return []
+            if method == "getAccountInfo":
+                return {"value": {"data": [__import__("base64").b64encode(raw).decode(), "base64"]}}
+            if method == "getBalance":
+                return {"value": 6_000_000}
+            if method == "getTokenAccountsByOwner":
+                return {
+                    "value": [
+                        {
+                            "account": {
+                                "data": {
+                                    "parsed": {
+                                        "info": {"tokenAmount": {"uiAmount": 1.0}}
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            if method == "getLatestBlockhash":
+                return {"value": {"blockhash": "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"}}
+            if method == "sendTransaction":
+                return "one-list-signature"
+            if method == "getSignatureStatuses":
+                return {"value": [{"confirmationStatus": "finalized", "err": None}]}
+            raise AssertionError(method)
+
+        def get_json(url):
+            if "/ipfs/" in url:
+                return self._stub()
+            if "?payer=" in url:
+                return {"jobs": []}
+            if "/api/jobs/" in url:
+                address = url.rsplit("/", 1)[-1]
+                return {
+                    "address": address,
+                    "payer": payer,
+                    "market": MARKET,
+                    "state": 1,
+                    "node": "node",
+                }
+            raise AssertionError(url)
+
+        receipt = bootstrap_once(
+            bundle=self._bundle(),
+            sandbox_id="sb-list",
+            rpc_impl=rpc,
+            get_json=get_json,
+            request_impl=lambda **_: {"ok": True, "status": 200},
+            sleep=lambda _: None,
+        )
+        self.assertEqual(receipt["action"], "listed")
+        self.assertEqual(receipt["listSignature"], "one-list-signature")
         self.assertEqual(calls.count("sendTransaction"), 1)
 
 

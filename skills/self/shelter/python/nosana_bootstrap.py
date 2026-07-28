@@ -8,6 +8,7 @@ use Nosana's embedded Pinata credential.
 from __future__ import annotations
 
 import base64
+import argparse
 import hashlib
 import json
 import math
@@ -38,6 +39,9 @@ SYSTEM_PROGRAM = "11111111111111111111111111111111"
 DEFAULT_NOS_MOVE_OUT_RESERVE = 0.34
 DEFAULT_SOL_FEE_FLOOR = 0.005
 DEFAULT_NODE_DOMAIN = "node.k8s.prd.nos.ci"
+DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com"
+DEFAULT_JOBS_API = "https://dashboard.k8s.prd.nos.ci/api/jobs"
+MARKET_DISCRIMINATOR = bytes.fromhex("c94ebbe1f0c6c9fb")
 
 
 def decode_confidential_stub_cid(cid: str) -> bytes:
@@ -324,3 +328,303 @@ def submit_list_job(
     raise RuntimeError(
         f"list transaction confirmation unknown for {signature}; refusing to resubmit"
     )
+
+
+def parse_market_account(data: bytes) -> dict:
+    """Decode the fixed prefix of Nosana's public MarketAccount."""
+
+    if not isinstance(data, bytes) or len(data) < 64:
+        raise ValueError("market account data is too short")
+    if data[:8] != MARKET_DISCRIMINATOR:
+        raise ValueError("market account discriminator differs")
+    return {
+        "jobExpirationSec": struct.unpack_from("<q", data, 40)[0],
+        "jobPriceMicrounitsPerSec": struct.unpack_from("<Q", data, 48)[0],
+        "jobTimeoutSec": struct.unpack_from("<q", data, 56)[0],
+    }
+
+
+def make_rpc(rpc_url: str = DEFAULT_RPC_URL, *, post=requests.post):
+    def call(method: str, params: list):
+        response = post(
+            rpc_url,
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(
+                {"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                separators=(",", ":"),
+            ),
+            timeout=20,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("error") is not None:
+            raise RuntimeError(f"Solana RPC {method} failed")
+        if "result" not in payload:
+            raise RuntimeError(f"Solana RPC {method} returned no result")
+        return payload["result"]
+
+    return call
+
+
+def fetch_market_terms(rpc_impl, market: Pubkey) -> dict:
+    result = rpc_impl("getAccountInfo", [str(market), {"encoding": "base64"}])
+    try:
+        encoded = result["value"]["data"][0]
+        return parse_market_account(base64.b64decode(encoded))
+    except Exception as exc:
+        raise RuntimeError("market account readback is invalid") from exc
+
+
+def fetch_payer_balances(rpc_impl, payer: Pubkey) -> dict:
+    balance = rpc_impl("getBalance", [str(payer), {"commitment": "confirmed"}])
+    token = rpc_impl(
+        "getTokenAccountsByOwner",
+        [
+            str(payer),
+            {"mint": NOS_MINT},
+            {"encoding": "jsonParsed", "commitment": "confirmed"},
+        ],
+    )
+    try:
+        sol = int(balance["value"]) / 1_000_000_000
+        nos = sum(
+            float(row["account"]["data"]["parsed"]["info"]["tokenAmount"]["uiAmount"] or 0)
+            for row in token["value"]
+        )
+    except Exception as exc:
+        raise RuntimeError("payer balance readback is invalid") from exc
+    return {"sol": sol, "nos": nos}
+
+
+def _default_get_json(url: str) -> dict:
+    response = requests.get(url, timeout=20)
+    response.raise_for_status()
+    return response.json()
+
+
+def discover_active_job(
+    *,
+    payer: str,
+    market: str,
+    rpc_impl,
+    get_json=_default_get_json,
+    jobs_api: str = DEFAULT_JOBS_API,
+) -> dict | None:
+    """Recover via indexer first, then recent payer transactions for queued-job gaps."""
+
+    try:
+        payload = get_json(f"{jobs_api}?payer={payer}")
+        direct = select_active_job(payload.get("jobs", []), payer=payer, market=market)
+        if direct:
+            return direct
+    except Exception:
+        pass
+
+    try:
+        signatures = rpc_impl("getSignaturesForAddress", [payer, {"limit": 10}])
+    except Exception:
+        signatures = []
+    candidates = []
+    for row in signatures or []:
+        signature = row.get("signature") if isinstance(row, dict) else None
+        if not signature:
+            continue
+        try:
+            transaction = rpc_impl(
+                "getTransaction",
+                [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+            )
+            keys = transaction["transaction"]["message"]["accountKeys"]
+        except Exception:
+            continue
+        for key in keys:
+            address = key.get("pubkey") if isinstance(key, dict) else key
+            if not isinstance(address, str) or address == payer:
+                continue
+            try:
+                job = get_json(f"{jobs_api}/{address}")
+            except Exception:
+                continue
+            if (
+                job.get("payer") == payer
+                and job.get("market") == market
+                and int(job.get("state", -1)) in (0, 1)
+            ):
+                candidates.append(job)
+    return select_active_job(candidates, payer=payer, market=market)
+
+
+def wait_for_claimed_job(
+    *,
+    job_address: str,
+    get_json=_default_get_json,
+    jobs_api: str = DEFAULT_JOBS_API,
+    attempts: int = 36,
+    sleep=time.sleep,
+    interval_seconds: float = 5,
+) -> dict:
+    last = None
+    for attempt in range(attempts):
+        try:
+            last = get_json(f"{jobs_api}/{job_address}")
+        except Exception:
+            last = None
+        if (
+            isinstance(last, dict)
+            and last.get("address") == job_address
+            and int(last.get("state", -1)) == 1
+            and last.get("node")
+        ):
+            return last
+        if isinstance(last, dict) and int(last.get("state", -1)) == 2:
+            raise RuntimeError("Nosana job became terminal before confidential delivery")
+        if attempt + 1 < attempts:
+            sleep(interval_seconds)
+    raise RuntimeError(f"Nosana job {job_address} was not claimed within the delivery window")
+
+
+def verify_confidential_stub(
+    *,
+    get_json=_default_get_json,
+    cid: str = CONFIDENTIAL_STUB_CID,
+) -> bool:
+    expected = {
+        "version": "0.1",
+        "type": "container",
+        "meta": {"trigger": "cli"},
+        "logistics": {
+            "send": {"type": "api-listen", "args": {}},
+            "receive": {"type": "api-listen", "args": {}},
+        },
+        "ops": [],
+    }
+    actual = get_json(f"https://nosana.mypinata.cloud/ipfs/{cid}")
+    if actual != expected:
+        raise RuntimeError("public confidential stub differs from the pinned allowlist")
+    decode_confidential_stub_cid(cid)
+    return True
+
+
+def bootstrap_once(
+    *,
+    bundle: dict,
+    sandbox_id: str,
+    rpc_impl,
+    get_json=_default_get_json,
+    request_impl=None,
+    sleep=time.sleep,
+) -> dict:
+    """Recover or list once, deliver once, and return an allowlisted receipt."""
+
+    if not sandbox_id:
+        raise ValueError("sandbox id is required")
+    try:
+        payer = Keypair.from_base58_string(bundle["solanaSecret"])
+        market = Pubkey.from_string(bundle["market"])
+        timeout_sec = int(bundle["timeoutSec"])
+        definition = bundle["definition"]
+    except Exception as exc:
+        raise ValueError("bootstrap bundle is incomplete") from exc
+    if not isinstance(definition, dict) or not definition.get("ops"):
+        raise ValueError("bootstrap definition is invalid")
+    verify_confidential_stub(get_json=get_json)
+    existing = discover_active_job(
+        payer=str(payer.pubkey()),
+        market=str(market),
+        rpc_impl=rpc_impl,
+        get_json=get_json,
+    )
+    list_receipt = None
+    if existing:
+        job_address = existing["address"]
+        action = "recovered"
+    else:
+        terms = fetch_market_terms(rpc_impl, market)
+        balances = fetch_payer_balances(rpc_impl, payer.pubkey())
+        gate = evaluate_post_gate(
+            job_price_microunits_per_sec=terms["jobPriceMicrounitsPerSec"],
+            market_job_timeout_sec=terms["jobTimeoutSec"],
+            nos_balance=balances["nos"],
+            sol_balance=balances["sol"],
+        )
+        if not gate["allowed"]:
+            raise RuntimeError(f"post gate refused: {gate['reason']}")
+        list_receipt = submit_list_job(
+            payer=payer,
+            market=market,
+            timeout_sec=timeout_sec,
+            rpc_impl=rpc_impl,
+            sleep=sleep,
+        )
+        job_address = list_receipt["jobAddress"]
+        action = "listed"
+    claimed = wait_for_claimed_job(
+        job_address=job_address,
+        get_json=get_json,
+        sleep=sleep,
+    )
+    if claimed.get("payer") != str(payer.pubkey()) or claimed.get("market") != str(market):
+        raise RuntimeError("claimed job readback does not bind the expected payer and market")
+    delivery = deliver_definition_until_running(
+        job=claimed,
+        definition=definition,
+        cid=CONFIDENTIAL_STUB_CID,
+        secret_bytes=bytes(payer),
+        request_impl=request_impl,
+        sleep=sleep,
+    )
+    return {
+        "ok": True,
+        "sandboxId": sandbox_id,
+        "action": action,
+        "payer": str(payer.pubkey()),
+        "market": str(market),
+        "jobAddress": job_address,
+        "listSignature": list_receipt["signature"] if list_receipt else None,
+        "listStatus": list_receipt["status"] if list_receipt else None,
+        "delivery": delivery,
+    }
+
+
+def _cli() -> int:
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="mode", required=True)
+    prepare = subparsers.add_parser("prepare-key")
+    prepare.add_argument("--key-path", required=True)
+    bootstrap = subparsers.add_parser("bootstrap")
+    bootstrap.add_argument("--key-path", required=True)
+    bootstrap.add_argument("ciphertext_chunks", nargs="+")
+    args = parser.parse_args()
+    sandbox_id = os.environ.get("MODAL_SANDBOX_ID", "")
+    if not sandbox_id:
+        raise RuntimeError("MODAL_SANDBOX_ID is required")
+    if args.mode == "prepare-key":
+        result = {
+            "ok": True,
+            "sandboxId": sandbox_id,
+            "publicKey": prepare_ephemeral_key(args.key_path),
+        }
+    else:
+        ciphertext = base64.b64decode("".join(args.ciphertext_chunks), validate=True)
+        bundle = decrypt_bootstrap_bundle(ciphertext, args.key_path)
+        result = bootstrap_once(
+            bundle=bundle,
+            sandbox_id=sandbox_id,
+            rpc_impl=make_rpc(bundle.get("rpcUrl", DEFAULT_RPC_URL)),
+        )
+    print(json.dumps(result, separators=(",", ":"), ensure_ascii=False), flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(_cli())
+    except Exception as error:
+        print(
+            json.dumps(
+                {"ok": False, "error": str(error)[:200]},
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
+        raise SystemExit(1)
