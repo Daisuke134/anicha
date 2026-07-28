@@ -8,4 +8,4 @@ source "$HOME/.openclaw/.env"
 export ANICCA_HOME="${REFILL_ANICCA_HOME:-$HOME/.blockrun}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-exec /usr/bin/env node "$REPO_ROOT/bin/citizen-refill" --live
+exec /opt/homebrew/bin/node "$REPO_ROOT/bin/citizen-refill" --live
