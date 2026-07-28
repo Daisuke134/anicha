@@ -1,0 +1,69 @@
+{
+  "v": 1,
+  "claim": "Modal posts or recovers the confidential Python Nosana service while Franklin1 is unloaded from the Mac",
+  "payer": "71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf",
+  "market": "7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq",
+  "job": {
+    "address": "DdUqQh8Tm3LVXhUYsBbDmhuQNgAQhdAuc6XpgUAvWPS4",
+    "state": 1,
+    "timeoutSeconds": 2400,
+    "usdRewardPerHour": 0.043345153,
+    "runtimeCostUsd": 0.028896768666666663,
+    "listSignature": "wHBwJ8oXYF2fUbMFE96EgzEQtSMNcJtjPP6Ym8Adf3vUfD7qJSe6D2a4fo2r48wnNV3RZSkkWvcG4KXWWiQq4ZB",
+    "listStatus": "finalized",
+    "serviceUrl": "https://3r9A3tsCCbuMCXxbKLbKGJVfpFofga6q69Tt4vUYZKMY.node.k8s.prd.nos.ci"
+  },
+  "firstBootstrap": {
+    "sandboxId": "sb-wfum2N1044meGAswyc3zSC",
+    "action": "listed",
+    "providerHttpStatuses": [200, 200, 200, 200],
+    "execCount": 3,
+    "deliveryHttpStatus": 200
+  },
+  "restartBootstrap": {
+    "sandboxId": "sb-52EMSJtDW5vQI8fE11NUD3",
+    "action": "recovered",
+    "jobAddress": "DdUqQh8Tm3LVXhUYsBbDmhuQNgAQhdAuc6XpgUAvWPS4",
+    "listSignature": null,
+    "reconciled": true,
+    "attempts": 0,
+    "httpStatus": 200
+  },
+  "selfRenewal": {
+    "initialTimeoutSeconds": 600,
+    "observedTimeoutSeconds": 2400,
+    "finalizedSignatures": [
+      "4Me9sSqBmzD8VCuHv6iDinwVr6NWciszaTrF6UMWmPv6jwN6QCdz1EYT9jiKAkRnMcepcLuYWaPb7pfZ1XnQLHWv",
+      "3Y549sCeC7dHJvgiX6LDAQ9xKnUasXAa6125ZH7CTaPFfwNTufCAgHbUjFAunRPT1oAfSVSrN2MDk2cZKBWsNLKy",
+      "4enWUPrEZpEmp26bm5bGv5RiRCZT6pKDW1i4DWmXzTrjc1in21tsBqVs2TAJBuJvxegkjEDXo4CYYrv33HqSD2x4"
+    ],
+    "nosMoveOutReserve": 0.34,
+    "solFeeFloor": 0.005
+  },
+  "publicProof": {
+    "statementHttpStatus": 200,
+    "heartbeatsClaimed": 4,
+    "heartbeatsVerified": 4,
+    "externalRevenueUsd": 0.0,
+    "runtimeCostMatchesNosanaApi": true,
+    "confidentialStubCid": "QmYBbVdWFgfoTEdPT7mnaXJz6zQzfKb1Pts4A5B9kDMBph",
+    "confidentialStubOps": []
+  },
+  "mac": {
+    "franklin1LaunchctlExit": 113,
+    "franklin1Loaded": false,
+    "franklin2LaunchctlExit": 0,
+    "franklin2State": "running"
+  },
+  "supersededProofJob": {
+    "address": "BsjuTkzKbryb5r95kpeVUpbaXMXLs4AKzPCMPNNyybpX",
+    "stopSignature": "3n362BFzgPFobvRy7F6CKmSPnd6TYxr6DrPwAzKJxMKjgf1SaBkJaFCNRfiHhUxDFFRXUGcrGr98AsADZc35iK4k",
+    "stopStatus": "finalized",
+    "reason": "its statement inherited the Modal fixed runtime cost; the live Nosana rate correction is deployed in the current job"
+  },
+  "tests": {
+    "python": {"passed": 50, "failed": 0},
+    "nodeFocused": {"passed": 6, "failed": 0},
+    "nodeShelterFull": {"passed": 242, "failed": 0}
+  }
+}
