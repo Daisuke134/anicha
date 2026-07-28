@@ -30,7 +30,7 @@
 - Listing must use the current market's fixed escrow requirement and preserve the `0.34 NOS` move-out reserve plus `0.005 SOL` fee floor.
 - Every transaction requires RPC confirmation and a fresh Nosana API readback binding payer, job, market, and state.
 - A delivery loop is finite and succeeds only after the node returns 2xx and the job transitions to running.
-- Completion requires two bootstrap passes for one job, exactly one list transaction, Mac Franklin loop stopped, continuing cloud heartbeat/statement, one in-container renewal, secret scan clean, and provider receipts.
+- Completion requires two bootstrap passes for one job, exactly one list transaction, the Mac Franklin loop still loaded but holding no cloud writer lease, continuing cloud heartbeat/statement, one in-container renewal, secret scan clean, and provider receipts. This is the non-destructive replacement for the stale “stop the Mac loop” proof: cloud authority is demonstrated by a lease/receipt invariant, not by unloading a working local service.
 
 ---
 
@@ -98,7 +98,7 @@
 - [ ] Fresh-read sub-wallet SOL/NOS/Base balances; use the existing S19 refill rail only if the fixed escrow plus move-out reserve is not funded.
 - [ ] Run one paid Modal bootstrap. Require create/exec receipts, list signature `finalized`, Nosana job readback, confidential delivery 2xx, and public IPFS body equal only to the stub.
 - [ ] Fetch the Nosana service statement and at least two signed heartbeats; verify signatures and Solana slots independently.
-- [ ] Stop only `ai.anicca.franklin-loop`; prove the same cloud job continues heartbeats and serves the statement.
+- [ ] Keep `ai.anicca.franklin-loop` loaded; prove the cloud job owns the writer lease, the Mac emits no duplicate cloud writes, and the same cloud job continues heartbeats and serves the statement.
 - [ ] Run a second paid Modal bootstrap after the first sandbox is gone. Require recovery of the same job, zero second list transaction, and successful re-delivery/reconciliation.
 - [ ] Observe one in-container lease extension and independently verify its transaction plus increased timeout.
 - [ ] Run secret-pattern scans, all test suites, `git diff --check`, and fresh provider/API/RPC readbacks.

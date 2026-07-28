@@ -1,7 +1,11 @@
 import hashlib
+import json
+from pathlib import Path
 import struct
+import tempfile
 import unittest
 
+from nacl.public import PublicKey, SealedBox
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 
@@ -10,7 +14,13 @@ from nosana_bootstrap import (
     JOBS_PROGRAM,
     build_authorization,
     build_list_instruction,
+    decrypt_bootstrap_bundle,
     decode_confidential_stub_cid,
+    deliver_definition_until_running,
+    evaluate_post_gate,
+    prepare_ephemeral_key,
+    select_active_job,
+    submit_list_job,
 )
 
 
@@ -122,6 +132,160 @@ class NosanaInstructionTests(unittest.TestCase):
                 timeout_sec=0,
                 cid=CONFIDENTIAL_STUB_CID,
             )
+
+
+class BootstrapBehaviorTests(unittest.TestCase):
+    def test_active_job_recovery_is_deterministic_and_requires_same_payer_market(self):
+        jobs = [
+            {"address": "old", "payer": "payer", "market": MARKET, "state": 1, "timeStart": 10},
+            {"address": "other-payer", "payer": "other", "market": MARKET, "state": 1, "timeStart": 99},
+            {"address": "done", "payer": "payer", "market": MARKET, "state": 2, "timeStart": 100},
+            {"address": "new", "payer": "payer", "market": MARKET, "state": 0, "timeStart": 20},
+        ]
+        self.assertEqual(select_active_job(jobs, payer="payer", market=MARKET)["address"], "new")
+        self.assertIsNone(select_active_job(jobs, payer="payer", market="another-market"))
+
+    def test_fixed_market_escrow_and_move_out_floor_gate(self):
+        allowed = evaluate_post_gate(
+            job_price_microunits_per_sec=45,
+            market_job_timeout_sec=7200,
+            nos_balance=0.70,
+            sol_balance=0.006,
+        )
+        self.assertTrue(allowed["allowed"])
+        self.assertAlmostEqual(allowed["escrowNos"], 0.324)
+        refused = evaluate_post_gate(
+            job_price_microunits_per_sec=45,
+            market_job_timeout_sec=7200,
+            nos_balance=0.50,
+            sol_balance=0.006,
+        )
+        self.assertFalse(refused["allowed"])
+        self.assertIn("move-out reserve", refused["reason"])
+
+    def test_gate_fails_closed_without_balance_or_fee_floor(self):
+        self.assertFalse(
+            evaluate_post_gate(
+                job_price_microunits_per_sec=45,
+                market_job_timeout_sec=7200,
+                nos_balance=None,
+                sol_balance=0.006,
+            )["allowed"]
+        )
+        self.assertFalse(
+            evaluate_post_gate(
+                job_price_microunits_per_sec=45,
+                market_job_timeout_sec=7200,
+                nos_balance=1,
+                sol_balance=0.0049,
+            )["allowed"]
+        )
+
+    def test_ephemeral_key_stays_in_sandbox_and_decrypts_only_ciphertext(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            key_path = Path(tmp) / "bootstrap.key"
+            public_b64 = prepare_ephemeral_key(key_path)
+            self.assertEqual(key_path.stat().st_mode & 0o777, 0o600)
+            plaintext = json.dumps(
+                {"solanaSecret": "secret-sol", "baseKey": "secret-base"}
+            ).encode()
+            ciphertext = SealedBox(PublicKey(__import__("base64").b64decode(public_b64))).encrypt(
+                plaintext
+            )
+            self.assertEqual(decrypt_bootstrap_bundle(ciphertext, key_path), json.loads(plaintext))
+            self.assertNotIn(b"secret-sol", ciphertext)
+
+    def test_delivery_retries_finitely_and_returns_only_safe_receipt(self):
+        calls = []
+        responses = iter(
+            [
+                {"status": 503, "ok": False},
+                {"status": 200, "ok": True},
+            ]
+        )
+
+        def request(**kwargs):
+            calls.append(kwargs)
+            return next(responses)
+
+        receipt = deliver_definition_until_running(
+            job={"address": "job", "node": "node"},
+            definition={"ops": [{"args": {"env": {"SECRET": "never-return"}}}]},
+            cid=CONFIDENTIAL_STUB_CID,
+            secret_bytes=bytes(Keypair.from_seed(bytes(range(32)))),
+            request_impl=request,
+            sleep=lambda _: None,
+            attempts=3,
+            now_ms=lambda: 1785144000123,
+        )
+        self.assertEqual(receipt, {"delivered": True, "attempts": 2, "httpStatus": 200})
+        self.assertEqual(len(calls), 2)
+        self.assertIn("Authorization", calls[0]["headers"])
+        self.assertNotIn("never-return", json.dumps(receipt))
+
+    def test_delivery_failure_is_bounded(self):
+        with self.assertRaisesRegex(RuntimeError, "after 2 attempts"):
+            deliver_definition_until_running(
+                job={"address": "job", "node": "node"},
+                definition={"ops": []},
+                cid=CONFIDENTIAL_STUB_CID,
+                secret_bytes=bytes(Keypair.from_seed(bytes(range(32)))),
+                request_impl=lambda **_: {"status": 503, "ok": False},
+                sleep=lambda _: None,
+                attempts=2,
+                now_ms=lambda: 1785144000123,
+            )
+
+    def test_submit_list_sends_once_and_requires_finalized_confirmation(self):
+        calls = []
+        blockhash = "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
+
+        def rpc(method, params):
+            calls.append((method, params))
+            if method == "getLatestBlockhash":
+                return {"value": {"blockhash": blockhash}}
+            if method == "sendTransaction":
+                return "tx-signature"
+            if method == "getSignatureStatuses":
+                return {"value": [{"confirmationStatus": "finalized", "err": None}]}
+            raise AssertionError(method)
+
+        payer = Keypair.from_seed(bytes(range(32)))
+        receipt = submit_list_job(
+            payer=payer,
+            market=Pubkey.from_string(MARKET),
+            timeout_sec=600,
+            rpc_impl=rpc,
+            job=Keypair.from_seed(bytes(range(32, 64))),
+            run=Keypair.from_seed(bytes(range(64, 96))),
+        )
+        self.assertEqual(receipt["signature"], "tx-signature")
+        self.assertEqual(receipt["status"], "finalized")
+        self.assertEqual([method for method, _ in calls].count("sendTransaction"), 1)
+
+    def test_submit_unknown_confirmation_never_resubmits(self):
+        calls = []
+
+        def rpc(method, params):
+            calls.append(method)
+            if method == "getLatestBlockhash":
+                return {"value": {"blockhash": "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"}}
+            if method == "sendTransaction":
+                return "tx-signature"
+            if method == "getSignatureStatuses":
+                return {"value": [None]}
+            raise AssertionError(method)
+
+        with self.assertRaisesRegex(RuntimeError, "unknown"):
+            submit_list_job(
+                payer=Keypair.from_seed(bytes(range(32))),
+                market=Pubkey.from_string(MARKET),
+                timeout_sec=600,
+                rpc_impl=rpc,
+                confirmation_attempts=2,
+                sleep=lambda _: None,
+            )
+        self.assertEqual(calls.count("sendTransaction"), 1)
 
 
 if __name__ == "__main__":
