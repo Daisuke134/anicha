@@ -216,6 +216,15 @@ function parseControlLine(stdout, kind) {
 
 
 function safeBootstrapReceipt(value, { sandboxId, market }) {
+  const deliveredNow = value.delivery?.delivered === true
+    && Number.isInteger(Number(value.delivery.attempts))
+    && Number(value.delivery.attempts) >= 1
+    && Number.isInteger(Number(value.delivery.httpStatus));
+  const recoveredRunning = value.action === "recovered"
+    && value.delivery?.delivered === false
+    && value.delivery?.alreadyRunning === true
+    && Number(value.delivery.attempts) === 0
+    && value.delivery.httpStatus == null;
   if (
     value.sandboxId !== sandboxId
     || value.market !== market
@@ -225,10 +234,7 @@ function safeBootstrapReceipt(value, { sandboxId, market }) {
     || typeof value.jobAddress !== "string"
     || !value.jobAddress
     || !value.delivery
-    || value.delivery.delivered !== true
-    || !Number.isInteger(Number(value.delivery.attempts))
-    || Number(value.delivery.attempts) < 1
-    || !Number.isInteger(Number(value.delivery.httpStatus))
+    || (!deliveredNow && !recoveredRunning)
   ) {
     throw new Error("bootstrap receipt is incomplete");
   }
@@ -257,9 +263,10 @@ function safeBootstrapReceipt(value, { sandboxId, market }) {
     listSignature: value.listSignature ?? null,
     listStatus: value.listStatus ?? null,
     delivery: {
-      delivered: true,
+      delivered: deliveredNow,
       attempts: Number(value.delivery.attempts),
-      httpStatus: Number(value.delivery.httpStatus),
+      httpStatus: deliveredNow ? Number(value.delivery.httpStatus) : null,
+      alreadyRunning: recoveredRunning,
     },
   };
 }

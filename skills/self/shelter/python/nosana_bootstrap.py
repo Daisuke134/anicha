@@ -565,14 +565,22 @@ def bootstrap_once(
     )
     if claimed.get("payer") != str(payer.pubkey()) or claimed.get("market") != str(market):
         raise RuntimeError("claimed job readback does not bind the expected payer and market")
-    delivery = deliver_definition_until_running(
-        job=claimed,
-        definition=definition,
-        cid=CONFIDENTIAL_STUB_CID,
-        secret_bytes=bytes(payer),
-        request_impl=request_impl,
-        sleep=sleep,
-    )
+    if existing and int(existing.get("state", -1)) == 1:
+        delivery = {
+            "delivered": False,
+            "attempts": 0,
+            "httpStatus": None,
+            "alreadyRunning": True,
+        }
+    else:
+        delivery = deliver_definition_until_running(
+            job=claimed,
+            definition=definition,
+            cid=CONFIDENTIAL_STUB_CID,
+            secret_bytes=bytes(payer),
+            request_impl=request_impl,
+            sleep=sleep,
+        )
     return {
         "ok": True,
         "sandboxId": sandbox_id,

@@ -356,12 +356,23 @@ class BootstrapBehaviorTests(unittest.TestCase):
             sandbox_id="sb-recovery",
             rpc_impl=lambda method, params: (_ for _ in ()).throw(AssertionError(method)),
             get_json=get_json,
-            request_impl=lambda **_: {"ok": True, "status": 200},
+            request_impl=lambda **_: (_ for _ in ()).throw(
+                AssertionError("a RUNNING job already has its confidential definition")
+            ),
             sleep=lambda _: None,
         )
         self.assertEqual(receipt["action"], "recovered")
         self.assertIsNone(receipt["listSignature"])
         self.assertEqual(receipt["jobAddress"], "job-active")
+        self.assertEqual(
+            receipt["delivery"],
+            {
+                "delivered": False,
+                "attempts": 0,
+                "httpStatus": None,
+                "alreadyRunning": True,
+            },
+        )
 
     def test_bootstrap_empty_state_lists_exactly_once(self):
         payer = str(Keypair.from_seed(bytes(range(32))).pubkey())
