@@ -140,7 +140,7 @@ test("a later sandbox can reconcile the same job without a second list", async (
     { sandbox_id: "sb-restart", status: "running" },
     { stdout: `${JSON.stringify({ ok: true, sandboxId: "sb-restart", publicKey: sandboxPublicKey })}\n`, returncode: 0 },
     {
-      stdout: `${JSON.stringify({
+      stdout: `provider diagnostic that is not part of the control receipt\n${JSON.stringify({
         ok: true,
         sandboxId: "sb-restart",
         action: "recovered",

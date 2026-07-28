@@ -144,13 +144,24 @@ export function buildBootstrapCommand({ ciphertextChunks } = {}) {
 function parseControlLine(stdout, kind) {
   if (typeof stdout !== "string") throw new Error(`${kind} stdout is missing`);
   const lines = stdout.split("\n").filter((line) => line.trim());
-  if (lines.length !== 1) throw new Error(`${kind} must return exactly one JSON line`);
-  let value;
-  try {
-    value = JSON.parse(lines[0]);
-  } catch {
-    throw new Error(`${kind} control line is not JSON`);
+  const controls = [];
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line);
+      if (
+        parsed
+        && typeof parsed === "object"
+        && typeof parsed.ok === "boolean"
+        && typeof parsed.sandboxId === "string"
+      ) controls.push(parsed);
+    } catch {
+      // Provider/runtime diagnostic lines are not trusted or returned to the caller.
+    }
   }
+  if (controls.length !== 1) {
+    throw new Error(`${kind} must return exactly one JSON control line`);
+  }
+  const [value] = controls;
   if (!value || value.ok !== true) throw new Error(`${kind} reported failure`);
   return value;
 }
