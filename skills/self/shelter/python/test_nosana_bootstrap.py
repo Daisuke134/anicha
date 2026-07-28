@@ -14,6 +14,7 @@ from nosana_bootstrap import (
     JOBS_PROGRAM,
     build_authorization,
     bind_job_address,
+    build_extend_instruction,
     build_list_instruction,
     bootstrap_once,
     decrypt_bootstrap_bundle,
@@ -43,6 +44,23 @@ class NosanaInstructionTests(unittest.TestCase):
             decode_confidential_stub_cid(CONFIDENTIAL_STUB_CID).hex(),
             "924301b36fefe50cd83c93a0686d2e25ce05da34b50cd79d04328ef3d0ec8cf6",
         )
+
+    def test_extend_instruction_uses_official_discriminator_accounts_and_i64_timeout(self):
+        instruction = build_extend_instruction(
+            payer=self.payer.pubkey(),
+            job=self.job.pubkey(),
+            market=Pubkey.from_string(MARKET),
+            new_timeout_sec=1200,
+        )
+        self.assertEqual(
+            instruction.data[:8],
+            hashlib.sha256(b"global:extend").digest()[:8],
+        )
+        self.assertEqual(struct.unpack("<q", instruction.data[8:])[0], 1200)
+        self.assertEqual(len(instruction.accounts), 10)
+        self.assertEqual(instruction.accounts[0].pubkey, self.job.pubkey())
+        self.assertTrue(instruction.accounts[6].is_signer)
+        self.assertTrue(instruction.accounts[7].is_signer)
 
     def test_list_instruction_matches_official_account_contract(self):
         instruction = build_list_instruction(

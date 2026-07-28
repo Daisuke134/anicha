@@ -5,7 +5,12 @@ import { gzipSync } from "node:zlib";
 import { buildServiceJobDefinition } from "../nosana/job-definition.mjs";
 
 
-const FILES = ["heartbeat.py", "statement.py", "nosana_runtime.py"];
+const FILES = [
+  "heartbeat.py",
+  "statement.py",
+  "nosana_bootstrap.py",
+  "nosana_runtime.py",
+];
 const ROOT = "/tmp/s21-python";
 export const JOB_ADDRESS_PLACEHOLDER = "__NOSANA_JOB_ADDRESS__";
 
@@ -40,7 +45,7 @@ export function buildPythonNosanaJobDefinition({
   const command = [
     "set -e",
     `python -c '${reconstruct}'`,
-    "python -m pip install --disable-pip-version-check --quiet PyNaCl==1.6.2 base58==2.1.1",
+    "python -m pip install --disable-pip-version-check --quiet PyNaCl==1.6.2 base58==2.1.1 solders==0.27.1 requests==2.34.2",
     `exec python ${ROOT}/nosana_runtime.py`,
   ].join("; ");
   return buildServiceJobDefinition({
@@ -51,6 +56,8 @@ export function buildPythonNosanaJobDefinition({
     env: {
       SOLANA_SESSION: solanaSessionB58,
       NOSANA_JOB_ADDRESS: JOB_ADDRESS_PLACEHOLDER,
+      NOSANA_MARKET: "7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq",
+      RENEW_MARGIN_SEC: "1700",
       BASE_PUBLIC_ADDRESS: basePublicAddress,
     },
     id: "franklin-python",

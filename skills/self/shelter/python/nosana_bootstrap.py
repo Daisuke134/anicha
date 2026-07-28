@@ -111,6 +111,80 @@ def build_list_instruction(
     return Instruction(jobs_program, data, accounts)
 
 
+def build_extend_instruction(
+    *,
+    payer: Pubkey,
+    job: Pubkey,
+    market: Pubkey,
+    new_timeout_sec: int,
+) -> Instruction:
+    """Build Nosana Jobs `extend` with the official Anchor account order."""
+
+    if not isinstance(new_timeout_sec, int) or new_timeout_sec <= 0:
+        raise ValueError("new timeout must be a positive integer")
+    jobs_program = Pubkey.from_string(JOBS_PROGRAM)
+    mint = Pubkey.from_string(NOS_MINT)
+    rewards_program = Pubkey.from_string(REWARDS_PROGRAM)
+    accounts = [
+        AccountMeta(job, False, True),
+        AccountMeta(market, False, False),
+        AccountMeta(_associated_token_address(payer, mint), False, True),
+        AccountMeta(_pda([bytes(market), bytes(mint)], jobs_program), False, True),
+        AccountMeta(_pda([b"reflection"], rewards_program), False, True),
+        AccountMeta(_pda([bytes(mint)], rewards_program), False, True),
+        AccountMeta(payer, True, False),
+        AccountMeta(payer, True, False),
+        AccountMeta(rewards_program, False, False),
+        AccountMeta(Pubkey.from_string(TOKEN_PROGRAM), False, False),
+    ]
+    data = hashlib.sha256(b"global:extend").digest()[:8] + struct.pack(
+        "<q", new_timeout_sec
+    )
+    return Instruction(jobs_program, data, accounts)
+
+
+def submit_extend_job(
+    *,
+    payer: Keypair,
+    job: Pubkey,
+    market: Pubkey,
+    new_timeout_sec: int,
+    rpc_impl,
+    confirmation_attempts: int = 20,
+    sleep=time.sleep,
+) -> dict:
+    instruction = build_extend_instruction(
+        payer=payer.pubkey(),
+        job=job,
+        market=market,
+        new_timeout_sec=new_timeout_sec,
+    )
+    latest = rpc_impl("getLatestBlockhash", [{"commitment": "finalized"}])
+    blockhash = Hash.from_string(latest["value"]["blockhash"])
+    message = Message.new_with_blockhash([instruction], payer.pubkey(), blockhash)
+    transaction = Transaction([payer], message, blockhash)
+    signature = rpc_impl(
+        "sendTransaction",
+        [
+            base64.b64encode(bytes(transaction)).decode("ascii"),
+            {"encoding": "base64", "preflightCommitment": "confirmed"},
+        ],
+    )
+    for attempt in range(confirmation_attempts):
+        result = rpc_impl(
+            "getSignatureStatuses",
+            [[signature], {"searchTransactionHistory": True}],
+        )
+        status = (result.get("value") or [None])[0]
+        if status and status.get("err") is not None:
+            raise RuntimeError("extend transaction failed on-chain")
+        if status and status.get("confirmationStatus") == "finalized":
+            return {"signature": signature, "status": "finalized"}
+        if attempt + 1 < confirmation_attempts:
+            sleep(1)
+    raise RuntimeError(f"extend confirmation unknown for {signature}; refusing to retry")
+
+
 def build_authorization(
     message: str,
     secret_bytes: bytes,
