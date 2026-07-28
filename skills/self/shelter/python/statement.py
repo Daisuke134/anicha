@@ -220,6 +220,7 @@ def build_public_statement(
     polymarket_address,
     request_json=request_json,
     heartbeats=(),
+    runtime_cost_usd=RUNTIME_COST_USD,
     now_ms=lambda: int(time.time() * 1000),
 ):
     if not isinstance(sandbox_id, str) or not sandbox_id.startswith("sb-"):
@@ -227,6 +228,7 @@ def build_public_statement(
     base_address = _evm_address(base_address, "base_address")
     solana_address = _solana_address(solana_address)
     polymarket_address = _evm_address(polymarket_address, "polymarket_address")
+    runtime_cost_usd = _nonnegative_number(runtime_cost_usd, "runtime_cost_usd")
     heartbeat_rows = list(heartbeats)
     base_usdc = fetch_base_usdc(base_address, request_json=request_json)
     solana = fetch_solana_balances(solana_address, request_json=request_json)
@@ -248,7 +250,7 @@ def build_public_statement(
         "polymarket": polymarket,
         "economy": {
             "externalRevenueUsd": 0.0,
-            "runtimeCostUsd": RUNTIME_COST_USD,
+            "runtimeCostUsd": runtime_cost_usd,
             "verdict": "funded",
         },
         "heartbeats": {
@@ -328,16 +330,23 @@ public snapshot is at <code>/statement.json</code>.</p>
 """
 
 
-def make_statement_handler(statement, heartbeat_jsonl, statement_provider=None):
+def make_statement_handler(
+    statement,
+    heartbeat_jsonl,
+    statement_provider=None,
+    heartbeat_provider=None,
+):
     statement = allowlist_public_statement(statement)
     if statement_provider is None:
         statement_provider = lambda: statement
-    heartbeat_body = heartbeat_jsonl.encode("utf-8")
+    if heartbeat_provider is None:
+        heartbeat_provider = lambda: heartbeat_jsonl
 
     class StatementHandler(BaseHTTPRequestHandler):
         def _respond(self, include_body):
             if self.path == "/heartbeats":
-                content_type, body = "application/x-ndjson; charset=utf-8", heartbeat_body
+                content_type = "application/x-ndjson; charset=utf-8"
+                body = heartbeat_provider().encode("utf-8")
             elif self.path in ("/", "/statement.json"):
                 current = allowlist_public_statement(statement_provider())
                 if self.path == "/":
@@ -370,28 +379,45 @@ def make_statement_handler(statement, heartbeat_jsonl, statement_provider=None):
     return StatementHandler
 
 
-def serve_statement(*, statement_file, heartbeats_file, port):
+def serve_statement(
+    *,
+    statement_file,
+    heartbeats_file,
+    port,
+    runtime_cost_usd_provider=None,
+):
     statement = json.loads(Path(statement_file).read_text(encoding="utf-8"))
-    heartbeat_jsonl = Path(heartbeats_file).read_text(encoding="utf-8")
-    claimed = statement["heartbeats"]["claimed"]
-    verified = statement["heartbeats"]["verified"]
-    heartbeat_rows = [{"verified": index < verified} for index in range(claimed)]
+    heartbeat_path = Path(heartbeats_file)
+
+    def current_heartbeat_rows():
+        rows = []
+        for line in heartbeat_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            rows.append({**row, "verified": _verify_heartbeat_row(row)})
+        return rows
 
     def current_statement():
+        runtime_cost_usd = statement["economy"]["runtimeCostUsd"]
+        if runtime_cost_usd_provider is not None:
+            runtime_cost_usd = runtime_cost_usd_provider()
         return build_public_statement(
             sandbox_id=statement["sandboxId"],
             base_address=statement["wallets"]["base"],
             solana_address=statement["wallets"]["solana"],
             polymarket_address=statement["wallets"]["polymarket"],
-            heartbeats=heartbeat_rows,
+            heartbeats=current_heartbeat_rows(),
+            runtime_cost_usd=runtime_cost_usd,
         )
 
     handler = make_statement_handler(
         statement,
-        heartbeat_jsonl,
+        heartbeat_path.read_text(encoding="utf-8"),
         statement_provider=current_statement,
+        heartbeat_provider=lambda: heartbeat_path.read_text(encoding="utf-8"),
     )
-    server = ThreadingHTTPServer(("127.0.0.1", int(port)), handler)
+    server = ThreadingHTTPServer(("0.0.0.0", int(port)), handler)
     server.serve_forever()
 
 

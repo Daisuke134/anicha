@@ -24,6 +24,8 @@ const MAX_COMMAND_PART = 2000;
 const SANDBOX_ROOT = "/tmp/s21-nosana";
 const SANDBOX_SOURCE = `${SANDBOX_ROOT}/nosana_bootstrap.py`;
 const SANDBOX_KEY = `${SANDBOX_ROOT}/bootstrap.key`;
+const SANDBOX_RECEIPT = `${SANDBOX_ROOT}/bootstrap.receipt`;
+const SANDBOX_STDERR = `${SANDBOX_ROOT}/bootstrap.stderr`;
 const DEFAULT_MARKET = "7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq";
 const WRITER_LEASE_MAX_AGE_MS = 15 * 60 * 1000;
 
@@ -192,25 +194,51 @@ export function buildBootstrapCommand({ ciphertextChunks } = {}) {
     throw new Error("ciphertext chunks are required");
   }
   const script = [
-    `exec python ${SANDBOX_SOURCE} bootstrap`,
+    `rm -f ${SANDBOX_RECEIPT} ${SANDBOX_STDERR};`,
+    `nohup python ${SANDBOX_SOURCE} bootstrap`,
     `--key-path ${SANDBOX_KEY}`,
     '"$@"',
+    `>${SANDBOX_RECEIPT} 2>${SANDBOX_STDERR} &`,
+    `printf '{"ok":true,"sandboxId":"%s","started":true}\\n' "$MODAL_SANDBOX_ID"`,
   ].join(" ");
   return assertBounded(["sh", "-c", script, "nosana-bootstrap-ciphertext", ...ciphertextChunks]);
+}
+
+
+export function buildCollectCommand() {
+  const script =
+    `for i in $(seq 1 55); do if [ -s ${SANDBOX_RECEIPT} ]; then ` +
+    `cat ${SANDBOX_RECEIPT}; exit 0; fi; sleep 1; done; ` +
+    `printf '{"ok":false,"sandboxId":"%s","error":"bootstrap receipt is still pending"}\\n' "$MODAL_SANDBOX_ID"`;
+  return assertBounded(["sh", "-c", script]);
 }
 
 
 function parseControlLine(stdout, kind) {
   if (typeof stdout !== "string") throw new Error(`${kind} stdout is missing`);
   const lines = stdout.split("\n").filter((line) => line.trim());
-  if (lines.length !== 1) throw new Error(`${kind} must return exactly one JSON line`);
-  let value;
-  try {
-    value = JSON.parse(lines[0]);
-  } catch {
-    throw new Error(`${kind} control line is not JSON`);
+  const controls = [];
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line);
+      if (
+        parsed
+        && typeof parsed === "object"
+        && typeof parsed.ok === "boolean"
+        && typeof parsed.sandboxId === "string"
+      ) controls.push(parsed);
+    } catch {
+      // Provider/runtime diagnostic lines are not trusted or returned to the caller.
+    }
   }
-  if (!value || value.ok !== true) throw new Error(`${kind} reported failure`);
+  if (controls.length !== 1) {
+    throw new Error(`${kind} must return exactly one JSON control line`);
+  }
+  const [value] = controls;
+  if (!value || value.ok !== true) {
+    const detail = typeof value?.error === "string" ? `: ${value.error.slice(0, 200)}` : "";
+    throw new Error(`${kind} reported failure${detail}`);
+  }
   return value;
 }
 
@@ -225,6 +253,13 @@ function safeBootstrapReceipt(value, { sandboxId, market }) {
     && value.delivery?.alreadyRunning === true
     && Number(value.delivery.attempts) === 0
     && value.delivery.httpStatus == null;
+  const reconciledRunning = value.action === "recovered"
+    && value.delivery?.delivered === false
+    && value.delivery?.reconciled === true
+    && Number(value.delivery.attempts) === 0
+    && Number.isInteger(Number(value.delivery.httpStatus))
+    && typeof value.delivery.serviceUrl === "string"
+    && value.delivery.serviceUrl.startsWith("https://");
   if (
     value.sandboxId !== sandboxId
     || value.market !== market
@@ -234,7 +269,7 @@ function safeBootstrapReceipt(value, { sandboxId, market }) {
     || typeof value.jobAddress !== "string"
     || !value.jobAddress
     || !value.delivery
-    || (!deliveredNow && !recoveredRunning)
+    || (!deliveredNow && !recoveredRunning && !reconciledRunning)
   ) {
     throw new Error("bootstrap receipt is incomplete");
   }
@@ -264,9 +299,16 @@ function safeBootstrapReceipt(value, { sandboxId, market }) {
     listStatus: value.listStatus ?? null,
     delivery: {
       delivered: deliveredNow,
+      reconciled: reconciledRunning,
       attempts: Number(value.delivery.attempts),
-      httpStatus: deliveredNow ? Number(value.delivery.httpStatus) : null,
+      httpStatus: deliveredNow || reconciledRunning
+        ? Number(value.delivery.httpStatus)
+        : null,
       alreadyRunning: recoveredRunning,
+      serviceUrl:
+        typeof value.delivery.serviceUrl === "string"
+          ? value.delivery.serviceUrl
+          : null,
     },
   };
 }
@@ -280,6 +322,8 @@ export async function bootstrapNosanaFromModal({
   fetchImpl,
   timeoutSec = 600,
   modalTimeoutSec = 300,
+  waitImpl = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  collectDelayMs = 90_000,
   writerLeasePath = defaultWriterLeasePath(),
 } = {}) {
   const writerLease = acquireBootstrapWriterLease({ leasePath: writerLeasePath });
@@ -326,9 +370,24 @@ export async function bootstrapNosanaFromModal({
   if (!bootstrapped.ok) {
     throw new Error(`Modal bootstrap exec failed with HTTP ${bootstrapped.status}`);
   }
+  const started = parseControlLine(
+    String(bootstrapped.json?.stdout ?? bootstrapped.json?.output ?? ""),
+    "bootstrap-start",
+  );
+  if (started.sandboxId !== sandboxId || started.started !== true) {
+    throw new Error("bootstrap-start receipt is incomplete");
+  }
+  await waitImpl(collectDelayMs);
+  const collected = await postModal(doFetch, "sandbox/exec", {
+    sandbox_id: sandboxId,
+    command: buildCollectCommand(),
+  });
+  if (!collected.ok) {
+    throw new Error(`Modal collect exec failed with HTTP ${collected.status}`);
+  }
   const receipt = safeBootstrapReceipt(
     parseControlLine(
-      String(bootstrapped.json?.stdout ?? bootstrapped.json?.output ?? ""),
+      String(collected.json?.stdout ?? collected.json?.output ?? ""),
       "bootstrap",
     ),
     { sandboxId, market },
@@ -341,7 +400,8 @@ export async function bootstrapNosanaFromModal({
       createHttpStatus: created.status,
       prepareHttpStatus: prepared.status,
       bootstrapHttpStatus: bootstrapped.status,
-      execCount: 2,
+      collectHttpStatus: collected.status,
+      execCount: 3,
     },
   };
   } finally {

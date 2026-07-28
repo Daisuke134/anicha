@@ -13,14 +13,18 @@ from nosana_bootstrap import (
     CONFIDENTIAL_STUB_CID,
     JOBS_PROGRAM,
     build_authorization,
+    bind_job_address,
+    build_extend_instruction,
     build_list_instruction,
     bootstrap_once,
     decrypt_bootstrap_bundle,
     decode_confidential_stub_cid,
+    discover_active_job,
     deliver_definition_until_running,
     evaluate_post_gate,
     prepare_ephemeral_key,
     parse_market_account,
+    reconcile_running_service,
     select_active_job,
     submit_list_job,
 )
@@ -40,6 +44,23 @@ class NosanaInstructionTests(unittest.TestCase):
             decode_confidential_stub_cid(CONFIDENTIAL_STUB_CID).hex(),
             "924301b36fefe50cd83c93a0686d2e25ce05da34b50cd79d04328ef3d0ec8cf6",
         )
+
+    def test_extend_instruction_uses_official_discriminator_accounts_and_i64_timeout(self):
+        instruction = build_extend_instruction(
+            payer=self.payer.pubkey(),
+            job=self.job.pubkey(),
+            market=Pubkey.from_string(MARKET),
+            new_timeout_sec=1200,
+        )
+        self.assertEqual(
+            instruction.data[:8],
+            hashlib.sha256(b"global:extend").digest()[:8],
+        )
+        self.assertEqual(struct.unpack("<q", instruction.data[8:])[0], 1200)
+        self.assertEqual(len(instruction.accounts), 10)
+        self.assertEqual(instruction.accounts[0].pubkey, self.job.pubkey())
+        self.assertTrue(instruction.accounts[6].is_signer)
+        self.assertTrue(instruction.accounts[7].is_signer)
 
     def test_list_instruction_matches_official_account_contract(self):
         instruction = build_list_instruction(
@@ -174,6 +195,32 @@ class BootstrapBehaviorTests(unittest.TestCase):
         self.assertEqual(select_active_job(jobs, payer="payer", market=MARKET)["address"], "new")
         self.assertIsNone(select_active_job(jobs, payer="payer", market="another-market"))
 
+    def test_job_address_placeholder_is_bound_only_after_reconciliation(self):
+        original = {
+            "ops": [{"args": {"env": {
+                "NOSANA_JOB_ADDRESS": "__NOSANA_JOB_ADDRESS__",
+                "OTHER": "prefix-__NOSANA_JOB_ADDRESS__",
+            }}}],
+        }
+        bound = bind_job_address(original, "job-real")
+        self.assertEqual(bound["ops"][0]["args"]["env"]["NOSANA_JOB_ADDRESS"], "job-real")
+        self.assertEqual(
+            bound["ops"][0]["args"]["env"]["OTHER"],
+            "prefix-__NOSANA_JOB_ADDRESS__",
+        )
+
+    def test_discovery_fails_closed_when_indexer_is_unavailable(self):
+        def unavailable(_url):
+            raise RuntimeError("temporary indexer outage")
+
+        with self.assertRaisesRegex(RuntimeError, "cannot prove"):
+            discover_active_job(
+                payer="payer",
+                market=MARKET,
+                get_json=unavailable,
+                rpc_impl=lambda method, params: [],
+            )
+
     def test_fixed_market_escrow_and_move_out_floor_gate(self):
         allowed = evaluate_post_gate(
             job_price_microunits_per_sec=45,
@@ -264,6 +311,31 @@ class BootstrapBehaviorTests(unittest.TestCase):
                 attempts=2,
                 now_ms=lambda: 1785144000123,
             )
+
+    def test_running_service_reconciliation_avoids_confidential_redelivery(self):
+        calls = []
+
+        def request_get(**kwargs):
+            calls.append(kwargs["url"])
+            if kwargs["url"].endswith("/endpoints"):
+                return {
+                    "ok": True,
+                    "status": 200,
+                    "json": {"urls": {"service": {"url": "https://service.example"}}},
+                }
+            return {"ok": True, "status": 200, "json": None}
+
+        receipt = reconcile_running_service(
+            job={"address": "job", "node": "node"},
+            cid=CONFIDENTIAL_STUB_CID,
+            secret_bytes=bytes(Keypair.from_seed(bytes(range(32)))),
+            request_get=request_get,
+            now_ms=lambda: 1785144000123,
+        )
+        self.assertTrue(receipt["reconciled"])
+        self.assertFalse(receipt["delivered"])
+        self.assertEqual(receipt["serviceUrl"], "https://service.example")
+        self.assertEqual(len(calls), 2)
 
     def test_submit_list_sends_once_and_requires_finalized_confirmation(self):
         calls = []
@@ -356,6 +428,7 @@ class BootstrapBehaviorTests(unittest.TestCase):
             sandbox_id="sb-recovery",
             rpc_impl=lambda method, params: (_ for _ in ()).throw(AssertionError(method)),
             get_json=get_json,
+            service_get_impl=lambda **_: {"ok": True, "status": 200, "json": {"urls": {}}},
             request_impl=lambda **_: (_ for _ in ()).throw(
                 AssertionError("a RUNNING job already has its confidential definition")
             ),

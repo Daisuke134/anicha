@@ -4,7 +4,19 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 方式: superpowers (Obra)。vcsdd は使わない（恒久ルール）。
 
-## 検証済みの現状（2026-07-26 実測）
+## 現在の判定
+
+| 項目 | 現在の実測 |
+|---|---|
+| Mac Franklin1 | **unloaded**（`launchctl print` exit `113`）。Franklin2 は `state=running` のまま |
+| cloud runtime | Nosana job `DdUqQh8Tm3LVXhUYsBbDmhuQNgAQhdAuc6XpgUAvWPS4`、service [`3r9A…node.k8s.prd.nos.ci`](https://3r9A3tsCCbuMCXxbKLbKGJVfpFofga6q69Tt4vUYZKMY.node.k8s.prd.nos.ci)、3 public routes HTTP 200 |
+| 生存証拠 | Python heartbeat **4/4署名検証PASS**。lease は container 自身が `600→2400s` に延長し、3 tx finalized |
+| 決算書 | 外部収入 `$0.00`、Nosana API の実単価から計算した runtime cost `$0.0288967687`、API/公開値差分ゼロ |
+| restart | 1回目 Modal `sb-wfum2N1044meGAswyc3zSC` が list、2回目 `sb-52EMSJtDW5vQI8fE11NUD3` は同じjobを recover。2回目のlist txは **null** |
+| 証拠 | `specs/evidence/s21-modal-nosana-bootstrap-sb-wfum2N1044meGAswyc3zSC.json` |
+| current cursor | **13c-SELL / 13c-WORK** — colony外buyer/jobから累計 `$1` のverified着金を作る |
+
+## 検証済みの履歴（以下は各時点のスナップショット）
 
 | 事実 | 証拠 |
 |---|---|
@@ -209,15 +221,17 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 
 ### 待たない（今やる。全部こちらだけで閉じる）
 
-**現在地**: 支出側・異種runtime冗長化・cloud bootstrap は閉じた（家を買う・飯を買う・自分で延長する・尽きる前に止まる・尽きたら補給する・Pythonの2軒目からNosanaへ移る）。既存 Mac loop は止めず、次は Life Manager の `EARN-HC-1` と D群へ進む。
+**現在地**: 支出側・異種runtime冗長化・Mac-off・earning rail health contractまで閉じた。次は **13c-SELL / 13c-WORK: 外部payerから累計 `$1`**。
 
 | 順 | ID | やること | 状態 / なぜこの順か |
 |---|---|---|---|
 | ~~1~~ | S18 | renewer に金の床 | ✅ 完了。実残高 0.0267 NOS で `renew=false` を実測 |
 | ~~2~~ | S19 | 収入 → bridge → swap → sub-wallet top-up | ✅ 完了。live で 0.0267→0.5 NOS、tx `aYGEcC5k…` finalized |
 | ~~1~~ | **S20b** | **2軒目で生き延びる（Python 版の最小生存機能）** | ✅ 完了。x402、Python heartbeat、公開allowlist決算書を同じ `python:3.11` rail で実証。Node版Franklinではなく生存契約の異種runtime実装 |
-| ~~1~~ | **S21** | bootstrap を Modal へ（poster/signing/delivery を cloud にする） | ✅ 完了。Modal Python が Nosana 命令を署名・finalized確認・confidential deliveryし、Franklin が公開 endpoint と署名 heartbeat を継続。別 sandbox は同じ job を `recovered`、再list 0・RUNNING jobへの不要な再delivery 0。既存 Mac loop は停止せず running のまま |
-| 3 | D群 | Life Manager 設計（custody / dashboard / cap UI / 法務） | 上が揃って初めて「管理する対象」が実在する |
+| ~~1~~ | **S21** | bootstrap を Modal へ（Mac の関与を資金だけにする） | ✅ **完了**。Python が hand-built list instruction、confidential delivery、restart recovery、自己renewを実行。Mac Franklin1 unloaded 後も heartbeat/決算書が継続 |
+| ~~1~~ | **EARN-HC-1** | earning rail health contract | ✅ **完了**。8/8 instrumented、NOT-INSTRUMENTED 0。PM/x402/WORK/CAPITALは4/4 operational、inactive railはfrozen/not-liveへ固定 |
+| **1** | **13c-SELL / 13c-WORK** | colony外buyer/jobから累計 `$1` のverified着金 | **current cursor**。external payer + finalized receipt + provenance + ledger exactly-once。self-payは0、現在の外部収益は `$0.00` |
+| 3 | D群 | Life Manager 接続（custody / dashboard / cap UI / 法務） | agent economyをコード統合せず、wallet/ledger/health contractの3契約でLife Managerから管理する |
 | 4 | F群 | 記事 EN 更新 → JP | 数字待ちだが、**仕組みと検証手順は今書ける**。冗長化の記述は S20b の結果で書き換えが要る（現状の主張は実測より強い） |
 
 ### 1〜4 の「どうやるか」— 調査完了（2026-07-27、全部一次ソース読み）
@@ -230,13 +244,27 @@ done="Franklin 本体が Nosana 上で常駐稼働し、Mac mini を停止して
 | heartbeat 署名 | ✅ **完了・実測済み** | `skills/self/shelter/python/heartbeat.py` + `modal-heartbeat.mjs`。Modal sandbox `sb-0l4DnecMvMpXm4OzLLcFTn` 内だけで一時 Ed25519 鍵を生成し、同一公開鍵で約5.3秒間隔の2周期を署名（slot `435525136`→`435525148`）。既存 JS verifier + `citizen-steward --verify --rpc` が **2/2 PASS、blockhash も実 slot と一致**。証拠: `specs/evidence/s20b-python-heartbeat-sb-0l4DnecMvMpXm4OzLLcFTn.jsonl`。成功サイクルの実費は create $0.012 + exec $0.003 = **$0.015**。API の1引数2000文字制限を live で発見し、公開ソースを複数引数へ分割する回帰テストを追加。長期 wallet secret は sandbox に渡していない |
 | 決算書 serve | ✅ **完了・実測済み** | `statement.py` + `modal-statement.mjs`。Modal `sb-34xzazUQKuoGKBFWeh1PQ6` が一時URLの `/`・`/statement.json`・`/heartbeats` を全て **HTTP 200** でserve。再帰allowlist、外部収入 `$0.00`、runtime `$0.015`、`funded` を明記。Base USDC `1.766`、SOL `0.026094157`、NOS `0.5`、PM 2 positions / marked value `$7.9951` / cashPnl `$1.1166` / redeemable `0` は独立再読込と差分ゼロ。heartbeat は既存JS verifier + RPCで **2/2 PASS**。証拠: `specs/evidence/s20b-python-statement-sb-34xzazUQKuoGKBFWeh1PQ6*`。Quick Tunnel は開発用・一時的・SLA無し、lease は5分。liveで DNS公開遅延とx402 exec後決済を踏み、両方を有限リトライの回帰テストへ固定。S20b全デバッグ+証明費は `$0.075` |
 
-#### S21: cloud bootstrap — **✅ LIVE E2E 完了**
+#### S21: Mac を外す — **✅ LIVE COMPLETE**
 
-Modal `sb-rsWhfpKpMYqa6Ze3ievBEl` が Python だけで Nosana job `2iTbLb7K1DLfoAecuJaJ2CTQ4nFjR9UHb7BthFXdG1dq` を list（tx `5STpQkeR…` finalized）し、confidential definition を node へ HTTP 200 で配送した。公開 service `https://Xsk25wWauk3QkERhaaicH2BgHTdRjdKmxf7JoBKaD2Bd.node.k8s.prd.nos.ci` は HTTP 200、heartbeat は既存 verifier + Solana RPC で **14/14 署名 PASS・14/14 slot/blockhash 一致**。container renewer は lease を **600→1200秒**へ延長し、tx `3zqKx2Dy…` は finalized。
+| 検証 | 結果 |
+|---|---|
+| paid bootstrap | Modal `sb-wfum2N1044meGAswyc3zSC`、create + 3 exec 全HTTP 200。list tx `wHBwJ8…Qq4ZB` finalized |
+| confidential | 公開CID `QmYBbVd…DMBph` は `ops:[]` のstubだけ。秘密定義はclaimed nodeへsealed ciphertext経由で配送、HTTP 200 |
+| cloud service | job `DdUqQh8…WPS4`、[`service URL`](https://3r9A3tsCCbuMCXxbKLbKGJVfpFofga6q69Tt4vUYZKMY.node.k8s.prd.nos.ci) の `/`・`/statement.json`・`/heartbeats` がHTTP 200 |
+| heartbeat | 自然間隔4周期を独立 verifier で **4/4 PASS**。全行が同じjob/payerへbind |
+| 決算書 | `runtimeCostUsd` は固定値ではなくNosana APIの `usdRewardPerHour × timeout / 3600`。`2400s × $0.043345153/h = $0.0288967687`、公開値と一致 |
+| self-renew | container自身が `600→2400s`。extend tx `4Me9s…QLHWv` / `3Y549…NLKy` / `4enWU…D2x4` は全finalized。`0.34 NOS` move-out reserve + `0.005 SOL` fee floorで停止する |
+| Mac-off | Franklin1 launchd はunloaded（exit 113）。Franklin2はrunning。Mac側writerなしでもcloud heartbeat/statement継続 |
+| exactly once | 2回目 Modal `sb-52EMSJtDW5vQI8fE11NUD3` は同じjobをrecoverし、`listSignature=null`、service reconcile HTTP 200 |
 
-別 Modal `sb-u9aelLrYhmgMjsIwWbDJSE` は同じ job を `recovered` し、list transaction は null、active job は1本。RUNNING job は定義を既に持つため再deliveryしない。実弾中に2つの開発sessionが同時に空状態を見て1度だけ重複 list する race を検出し、古い job を tx `46a4ukL…` で終了、shared persistent state 上の atomic writer lease を追加した。全 shelter test は Node **242/242**、Python **42/42**。公開3 route と変更fileの実鍵一致は0。Mac の `ai.anicca.franklin-loop` は PID 816 / running / never exited のまま。証拠: `specs/evidence/s21-modal-nosana-bootstrap-sb-rsWhfpKpMYqa6Ze3ievBEl.json`。
+**liveで棄却した前提**:
 
-**境界**: poster・署名・delivery・Franklin runtime・heartbeat・renewal は cloud で動く。この段階は既存 Mac loop を破壊的に止めない。残る dispatch schedule と他 loop の移譲は Life Manager SSOT の後続項目で1本ずつ行う。
+| 前提 | 実測と修正 |
+|---|---|
+| Modalは2 execで足りる | claimが同期execの約60秒より長い。prepare → background bootstrap → collect の**3 exec**へ変更 |
+| indexer障害は「jobなし」と同じ | 一時障害でduplicate listを1件作った。探索不能時は**fail closed**に変更し、emptyを証明できた時だけlist |
+| 同時bootstrapはAPI照合だけで防げる | 2 processが同じempty snapshotを見るraceをliveで検出。shared persistent stateのatomic writer leaseを追加 |
+| 決算書のruntime costはModal固定 `$0.015` でよい | Nosana上では誤り。live job APIから動的算出し、旧jobを停止・返金後に修正版を再配置 |
 
 Python から Nosana に job を post する経路を一次ソースで確認した。
 
@@ -246,15 +274,15 @@ Python から Nosana に job を post する経路を一次ソースで確認し
 | `anchorpy` で IDL を読む | **不可**。`anchorpy-core` の IDL parser は 2023-12 で止まっており、Anchor 0.30.0(2024-04) の IDL 仕様変更に未追従。Nosana は **Anchor 1.0.2** でビルド。該当 issue が未解決で複数（#147/#163/#167/#149） | `Anchor.toml`、anchorpy の open issues |
 | 迂回策 | **命令を手で組む**。Anchor の discriminator は仕様不変で `sha256("global:list")[:8]`。program ID `nosJhNRqr2bc9g1nfGDcXXTXvYUmxD4cVwy2pMWhrYM`、`list(ipfs_job:[u8;32], timeout:i64)`、必要 account 一覧と PDA 導出は公開ソースに全部ある。`solders`/`solana-py` は現役 | `nosana-programs/programs/nosana-jobs/src/instructions/list.rs`、Anchor `lang/syn/src/codegen/program/common.rs:11-17` |
 | REST の write 経路 | **使えない**。`POST /jobs/list` は存在するが SDK が送信前に `API key is required` で throw。Nosana の有償 Deployments 向け | `@nosana/sdk` `dist/client/index.js:15-16` |
-| IPFS pin 先 | **Pinata**（`api.pinata.cloud/pinning/pinJSONToIPFS`）。`requests` 1発。**⚠ SDK には Nosana 所有の JWT が平文で同梱されている** | `dist/services/ipfs.js:52-74`、`dist/config.js` |
+| IPFS pin 先 | 新規pinは不要。Nosana公式confidential stubの既存immutable CIDをgateway body + CID digestの両方で検証して再利用 | live CID `QmYBbVdWFgfoTEdPT7mnaXJz6zQzfKb1Pts4A5B9kDMBph` |
 | confidential 配送 | poster が node の `/job/{id}/job-definition` に**5秒ごとに再送**。認証は「IPFS hash の生バイトを ed25519 署名して `<msg>:<base58(sig)>:<epoch_ms>`」 | `nosana-cli` `postJobDefinitionUntilSuccess`、`dist/services/authorization.js:10-46` |
 
 **非自明な唯一の難所 = PDA 導出と命令の手詰め。** それ以外は `requests` と ed25519 署名だけ。
 
-**★ 実装判断: 他人の埋め込み JWT に依存しない ★** confidential public stub は既存の不変 CID を本文まで照合して使い、新規 pin と Nosana 同梱 Pinata JWT の双方を不要にした。
+**★ 実装結果: Pinata資格情報を持たない ★** confidential public stubは内容が固定で秘密を含まないため、既存immutable CIDをdigestとbodyで毎回検証して使う。Nosana同梱JWTもDaisの個人credentialも不要。
 
-#### D群: Life Manager — **merge ではなく新規**（前節の実測どおり）
-接続点は `adapters/transport.{js,py}` のみ。他は全部ゼロから。**生きている Franklin が1体もいない状態で管理画面を作るのは、管理対象のない管理者を作ること**なので S20b/S21 の後で正しい。
+#### D群: Life Manager — **コードmergeではなく3契約で接続**
+接続点は ①wallet/cap、②earnings ledger、③rail health + daily/weekly report。agent economyのexecutorは隣接repoに保ち、Life Managerは人間向けsubscription、資金投入、権限、報告、法務境界を持つ。S21とEARN-HC-1により、管理対象のcloud citizenと機械判定可能なrail状態が実在する。
 
 #### F群: 記事 — 冗長化の記述が実測より強い
 
@@ -315,7 +343,7 @@ Python から Nosana に job を post する経路を一次ソースで確認し
 | 段 | 誰 | 実測（2026-07-27 深夜） | 役割 |
 |---|---|---|---|
 | treasury | owner `F5SYUC4f5QULbEgSYb1DFCBfi74AnWE3ZaXAhqXwhZ5T` | **0.607 NOS** | 資金の受け皿。`resolveSolanaSecret` が返すのはこっち |
-| shelter | sub-wallet `71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf`（`$ANICCA_HOME/.automaton/nosana_subwallet_key.json`） | **0.0267 NOS** | **家賃を実際に払う**。cap = 残高。cloud へ出る鍵はこれだけ |
+| shelter | sub-wallet `71FfqFniYoMsWZb1qFeQDb1fk2xqvajzivpsnMb44gTf`（`$ANICCA_HOME/.automaton/nosana_subwallet_key.json`） | **0.60408 NOS**（S21 snapshot。初回top-up capは0.75） | **家賃を実際に払う**。cap = 残高。cloud へ出る鍵はこれだけ |
 
 S19 の初回実装は treasury だけを見て「補給が要る」と判断していた。だが treasury は既に潤沢で、飢えているのは shelter の方。**橋は正しく渡るが、家賃を払う財布の1つ手前で止まる。** 補給は3脚（bridge → swap → **top-up**）で、最後の `fundSubWallet` が無いと何も解決しない。各脚は前の脚が成功した時だけ走る（届いていない金は動かせない）。
 

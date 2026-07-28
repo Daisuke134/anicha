@@ -137,6 +137,11 @@ class PublicSnapshot(unittest.TestCase):
         self.assertEqual(statement["heartbeats"], {"claimed": 2, "verified": 2})
         self.assertEqual(statement["generatedAt"], 1785150000123)
 
+    def test_accepts_provider_specific_runtime_cost(self):
+        statement = build_fixture(runtime_cost_usd=0.0289)
+
+        self.assertEqual(statement["economy"]["runtimeCostUsd"], 0.0289)
+
     def test_allowlist_drops_unknown_fields_at_every_level(self):
         candidate = {
             **build_fixture(),
@@ -217,6 +222,7 @@ class StatementRoutes(unittest.TestCase):
             self.statement,
             self.heartbeat_jsonl,
             statement_provider=lambda: self.current_statement,
+            heartbeat_provider=lambda: self.heartbeat_jsonl,
         )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -267,6 +273,11 @@ class StatementRoutes(unittest.TestCase):
 
         self.assertEqual(json.loads(statement_json)["balances"]["baseUsdc"], 1.811)
         self.assertIn(b"$1.811000", html)
+
+    def test_heartbeat_route_reads_current_rows_at_request_time(self):
+        self.heartbeat_jsonl += '{"v":1,"kind":"shelter-heartbeat","cycle":3}\\n'
+        _, _, heartbeats = self.fetch("/heartbeats")
+        self.assertEqual(heartbeats, self.heartbeat_jsonl.encode("utf-8"))
 
 
 class FakeProcess:

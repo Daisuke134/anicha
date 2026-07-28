@@ -42,6 +42,7 @@ DEFAULT_NODE_DOMAIN = "node.k8s.prd.nos.ci"
 DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com"
 DEFAULT_JOBS_API = "https://dashboard.k8s.prd.nos.ci/api/jobs"
 MARKET_DISCRIMINATOR = bytes.fromhex("c94ebbe1f0c6c9fb")
+JOB_ADDRESS_PLACEHOLDER = "__NOSANA_JOB_ADDRESS__"
 
 
 def decode_confidential_stub_cid(cid: str) -> bytes:
@@ -110,6 +111,80 @@ def build_list_instruction(
     return Instruction(jobs_program, data, accounts)
 
 
+def build_extend_instruction(
+    *,
+    payer: Pubkey,
+    job: Pubkey,
+    market: Pubkey,
+    new_timeout_sec: int,
+) -> Instruction:
+    """Build Nosana Jobs `extend` with the official Anchor account order."""
+
+    if not isinstance(new_timeout_sec, int) or new_timeout_sec <= 0:
+        raise ValueError("new timeout must be a positive integer")
+    jobs_program = Pubkey.from_string(JOBS_PROGRAM)
+    mint = Pubkey.from_string(NOS_MINT)
+    rewards_program = Pubkey.from_string(REWARDS_PROGRAM)
+    accounts = [
+        AccountMeta(job, False, True),
+        AccountMeta(market, False, False),
+        AccountMeta(_associated_token_address(payer, mint), False, True),
+        AccountMeta(_pda([bytes(market), bytes(mint)], jobs_program), False, True),
+        AccountMeta(_pda([b"reflection"], rewards_program), False, True),
+        AccountMeta(_pda([bytes(mint)], rewards_program), False, True),
+        AccountMeta(payer, True, False),
+        AccountMeta(payer, True, False),
+        AccountMeta(rewards_program, False, False),
+        AccountMeta(Pubkey.from_string(TOKEN_PROGRAM), False, False),
+    ]
+    data = hashlib.sha256(b"global:extend").digest()[:8] + struct.pack(
+        "<q", new_timeout_sec
+    )
+    return Instruction(jobs_program, data, accounts)
+
+
+def submit_extend_job(
+    *,
+    payer: Keypair,
+    job: Pubkey,
+    market: Pubkey,
+    new_timeout_sec: int,
+    rpc_impl,
+    confirmation_attempts: int = 20,
+    sleep=time.sleep,
+) -> dict:
+    instruction = build_extend_instruction(
+        payer=payer.pubkey(),
+        job=job,
+        market=market,
+        new_timeout_sec=new_timeout_sec,
+    )
+    latest = rpc_impl("getLatestBlockhash", [{"commitment": "finalized"}])
+    blockhash = Hash.from_string(latest["value"]["blockhash"])
+    message = Message.new_with_blockhash([instruction], payer.pubkey(), blockhash)
+    transaction = Transaction([payer], message, blockhash)
+    signature = rpc_impl(
+        "sendTransaction",
+        [
+            base64.b64encode(bytes(transaction)).decode("ascii"),
+            {"encoding": "base64", "preflightCommitment": "confirmed"},
+        ],
+    )
+    for attempt in range(confirmation_attempts):
+        result = rpc_impl(
+            "getSignatureStatuses",
+            [[signature], {"searchTransactionHistory": True}],
+        )
+        status = (result.get("value") or [None])[0]
+        if status and status.get("err") is not None:
+            raise RuntimeError("extend transaction failed on-chain")
+        if status and status.get("confirmationStatus") == "finalized":
+            return {"signature": signature, "status": "finalized"}
+        if attempt + 1 < confirmation_attempts:
+            sleep(1)
+    raise RuntimeError(f"extend confirmation unknown for {signature}; refusing to retry")
+
+
 def build_authorization(
     message: str,
     secret_bytes: bytes,
@@ -146,6 +221,18 @@ def select_active_job(jobs: list[dict], *, payer: str, market: str) -> dict | No
     if not eligible:
         return None
     return max(eligible, key=lambda job: (int(job.get("timeStart") or 0), job["address"]))
+
+
+def bind_job_address(value, job_address: str):
+    """Replace only the explicit confidential-definition placeholder."""
+
+    if value == JOB_ADDRESS_PLACEHOLDER:
+        return job_address
+    if isinstance(value, list):
+        return [bind_job_address(item, job_address) for item in value]
+    if isinstance(value, dict):
+        return {key: bind_job_address(item, job_address) for key, item in value.items()}
+    return value
 
 
 def evaluate_post_gate(
@@ -266,6 +353,54 @@ def deliver_definition_until_running(
 def _requests_post(*, url: str, headers: dict, body: str, timeout: float) -> dict:
     response = requests.post(url, headers=headers, data=body, timeout=timeout)
     return {"ok": response.ok, "status": response.status_code}
+
+
+def _requests_get(*, url: str, headers: dict | None = None, timeout: float = 15) -> dict:
+    response = requests.get(url, headers=headers or {}, timeout=timeout)
+    payload = None
+    try:
+        payload = response.json()
+    except Exception:
+        pass
+    return {"ok": response.ok, "status": response.status_code, "json": payload}
+
+
+def reconcile_running_service(
+    *,
+    job: dict,
+    cid: str,
+    secret_bytes: bytes,
+    request_get=_requests_get,
+    now_ms=lambda: int(time.time() * 1000),
+) -> dict | None:
+    """Prove an already-delivered confidential service is publicly answering."""
+
+    address = job.get("address")
+    node = job.get("node")
+    if not address or not node:
+        return None
+    authorization = build_authorization(cid, secret_bytes, now_ms=now_ms())
+    endpoints = request_get(
+        url=f"https://{node}.{DEFAULT_NODE_DOMAIN}/job/{address}/endpoints",
+        headers={"Authorization": authorization},
+        timeout=15,
+    )
+    payload = endpoints.get("json") if isinstance(endpoints, dict) else None
+    urls = payload.get("urls", {}) if isinstance(payload, dict) else {}
+    for row in urls.values():
+        service_url = row.get("url") if isinstance(row, dict) else None
+        if not isinstance(service_url, str) or not service_url.startswith("https://"):
+            continue
+        probe = request_get(url=service_url, headers={}, timeout=15)
+        if probe.get("ok"):
+            return {
+                "delivered": False,
+                "reconciled": True,
+                "attempts": 0,
+                "httpStatus": int(probe.get("status", 0)),
+                "serviceUrl": service_url,
+            }
+    return None
 
 
 def submit_list_job(
@@ -412,8 +547,12 @@ def discover_active_job(
 ) -> dict | None:
     """Recover via indexer first, then recent payer transactions for queued-job gaps."""
 
+    indexer_read_succeeded = False
     try:
         payload = get_json(f"{jobs_api}?payer={payer}")
+        if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+            raise RuntimeError("payer jobs response has an invalid shape")
+        indexer_read_succeeded = True
         direct = select_active_job(payload.get("jobs", []), payer=payer, market=market)
         if direct:
             return direct
@@ -451,7 +590,15 @@ def discover_active_job(
                 and int(job.get("state", -1)) in (0, 1)
             ):
                 candidates.append(job)
-    return select_active_job(candidates, payer=payer, market=market)
+    recovered = select_active_job(candidates, payer=payer, market=market)
+    if recovered:
+        return recovered
+    if not indexer_read_succeeded:
+        raise RuntimeError(
+            "cannot prove that no active Nosana job exists while the payer index is unavailable; "
+            "refusing to list"
+        )
+    return None
 
 
 def wait_for_claimed_job(
@@ -512,6 +659,7 @@ def bootstrap_once(
     rpc_impl,
     get_json=_default_get_json,
     request_impl=None,
+    service_get_impl=_requests_get,
     sleep=time.sleep,
 ) -> dict:
     """Recover or list once, deliver once, and return an allowlisted receipt."""
@@ -565,14 +713,23 @@ def bootstrap_once(
     )
     if claimed.get("payer") != str(payer.pubkey()) or claimed.get("market") != str(market):
         raise RuntimeError("claimed job readback does not bind the expected payer and market")
-    if existing and int(existing.get("state", -1)) == 1:
-        delivery = {
-            "delivered": False,
-            "attempts": 0,
-            "httpStatus": None,
-            "alreadyRunning": True,
-        }
-    else:
+    definition = bind_job_address(definition, job_address)
+    delivery = None
+    if action == "recovered":
+        delivery = reconcile_running_service(
+            job=claimed,
+            cid=CONFIDENTIAL_STUB_CID,
+            secret_bytes=bytes(payer),
+            request_get=service_get_impl,
+        )
+        if delivery is None and existing and int(existing.get("state", -1)) == 1:
+            delivery = {
+                "delivered": False,
+                "attempts": 0,
+                "httpStatus": None,
+                "alreadyRunning": True,
+            }
+    if delivery is None:
         delivery = deliver_definition_until_running(
             job=claimed,
             definition=definition,
@@ -632,7 +789,11 @@ if __name__ == "__main__":
     except Exception as error:
         print(
             json.dumps(
-                {"ok": False, "error": str(error)[:200]},
+                {
+                    "ok": False,
+                    "sandboxId": os.environ.get("MODAL_SANDBOX_ID", ""),
+                    "error": str(error)[:200],
+                },
                 separators=(",", ":"),
             ),
             flush=True,
