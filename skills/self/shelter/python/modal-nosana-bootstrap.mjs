@@ -3,6 +3,9 @@
 // then receives only ciphertext in the second exec.
 
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { blake2b } from "@noble/hashes/blake2";
@@ -22,6 +25,62 @@ const SANDBOX_ROOT = "/tmp/s21-nosana";
 const SANDBOX_SOURCE = `${SANDBOX_ROOT}/nosana_bootstrap.py`;
 const SANDBOX_KEY = `${SANDBOX_ROOT}/bootstrap.key`;
 const DEFAULT_MARKET = "7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq";
+const WRITER_LEASE_MAX_AGE_MS = 15 * 60 * 1000;
+
+
+function defaultWriterLeasePath() {
+  const stateDir = process.env.ANICCA_STATE_DIR
+    || path.join(process.env.ANICCA_HOME || path.join(os.homedir(), ".anicca"), "state");
+  return path.join(stateDir, "s21-nosana-bootstrap.writer.lock");
+}
+
+
+export function acquireBootstrapWriterLease({
+  leasePath = defaultWriterLeasePath(),
+  nowMs = Date.now(),
+  token = randomUUID(),
+  maxAgeMs = WRITER_LEASE_MAX_AGE_MS,
+} = {}) {
+  if (!path.isAbsolute(leasePath) || path.basename(leasePath) !== "s21-nosana-bootstrap.writer.lock"
+    && !path.basename(leasePath).endsWith(".lock")) {
+    throw new Error("writer lease path must be one absolute .lock file");
+  }
+  fs.mkdirSync(path.dirname(leasePath), { recursive: true, mode: 0o700 });
+
+  const create = () => {
+    const fd = fs.openSync(leasePath, "wx", 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify({ token, createdAt: nowMs }));
+    } finally {
+      fs.closeSync(fd);
+    }
+  };
+
+  try {
+    create();
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    const ageMs = nowMs - fs.statSync(leasePath).mtimeMs;
+    if (Number.isFinite(ageMs) && ageMs > maxAgeMs) {
+      fs.unlinkSync(leasePath);
+      create();
+    } else {
+      throw new Error("Nosana bootstrap writer lease is already held");
+    }
+  }
+
+  return {
+    leasePath,
+    release() {
+      try {
+        const current = JSON.parse(fs.readFileSync(leasePath, "utf8"));
+        if (current.token === token) fs.unlinkSync(leasePath);
+      } catch {
+        // A missing/replaced lease belongs to neither this process nor its cleanup path.
+      }
+    },
+  };
+}
 
 
 function chunks(value, size = SOURCE_CHUNK_SIZE) {
@@ -214,7 +273,10 @@ export async function bootstrapNosanaFromModal({
   fetchImpl,
   timeoutSec = 600,
   modalTimeoutSec = 300,
+  writerLeasePath = defaultWriterLeasePath(),
 } = {}) {
+  const writerLease = acquireBootstrapWriterLease({ leasePath: writerLeasePath });
+  try {
   if (!baseKey && !fetchImpl) throw new Error("no Base key to pay for Modal");
   const doFetch = fetchImpl || (await payingFetch(baseKey));
   const created = await postModal(doFetch, "sandbox/create", {
@@ -275,6 +337,9 @@ export async function bootstrapNosanaFromModal({
       execCount: 2,
     },
   };
+  } finally {
+    writerLease.release();
+  }
 }
 
 

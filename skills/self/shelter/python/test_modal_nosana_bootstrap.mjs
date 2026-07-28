@@ -1,10 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { blake2b } from "@noble/hashes/blake2";
 import nacl from "tweetnacl";
 
 import {
+  acquireBootstrapWriterLease,
   bootstrapNosanaFromModal,
   buildBootstrapCommand,
   buildPrepareCommand,
@@ -29,6 +33,37 @@ const secretBundle = {
     }],
   },
 };
+
+
+test("writer lease admits one bootstrap process and releases cleanly", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "s21-writer-lease-"));
+  const leasePath = path.join(dir, "writer.lock");
+  try {
+    const first = acquireBootstrapWriterLease({
+      leasePath,
+      nowMs: 1_000,
+      token: "writer-one",
+    });
+    assert.throws(
+      () => acquireBootstrapWriterLease({
+        leasePath,
+        nowMs: 1_001,
+        token: "writer-two",
+      }),
+      /writer lease is already held/,
+    );
+    first.release();
+    const second = acquireBootstrapWriterLease({
+      leasePath,
+      nowMs: 1_002,
+      token: "writer-two",
+    });
+    second.release();
+    assert.equal(fs.existsSync(leasePath), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 
 test("prepare command carries only pinned public source in bounded arguments", () => {
